@@ -5,7 +5,7 @@
  */
 
 // 本地持久化缓存地图状态的 localStorage key 键名
-export const STORAGE_KEY = 'agy-culture-map-v4';
+export const STORAGE_KEY = 'agy-culture-map-v6';
 
 // 初始默认的川渝火锅 AI 绘图资源配置
 export const FOOD_IMAGE_ASSET = {
@@ -817,6 +817,313 @@ export const DEFAULT_FOOD_THEME = {
     }
   ],
 };
+
+const ADDITIONAL_FOOD_AREAS = [
+  {
+    center: [123.5, 44.6],
+    color: '#8ab17d',
+    description: '炖菜、杂粮、乳肉与冰雪市集构成北疆与东北的厚实风味，热汤热锅里有辽阔土地的爽朗。',
+    id: 'northeast-grain-stew-food',
+    name: '东北草原炖菜区',
+    provinceAdcodes: ['150000', '210000', '220000', '230000'],
+    zoom: 3.2,
+    summaryAsset: {
+      coordinates: [123.5, 44.6],
+      id: 'summary-northeast-grain-stew-food',
+      size: { height: 160, width: 220 },
+      src: '/assets/food/china-food-ai.png',
+      title: '东北草原炖菜汇',
+      type: 'image',
+    },
+    assets: [],
+    foodItems: [],
+    quiz: {
+      question: '东北与草原饮食中常见的炖煮方式，最能体现哪类地域饮食特征？',
+      options: ['A. 小份冷食为主', 'B. 大锅热食、肉粮充足、御寒耐饱', 'C. 纯甜点饮食', 'D. 只吃生鲜海味'],
+      answerIndex: 1,
+      successReward: '解锁成功！已点亮“东北草原热锅图鉴”',
+    },
+  },
+  {
+    center: [117.8, 25.8],
+    color: '#6d597a',
+    description: '山海物产、米粉汤头、红糟沙茶与宝岛夜市相连，形成东南沿海轻巧鲜香的饮食脉络。',
+    id: 'southeast-mintai-gan-food',
+    name: '闽台赣山海米粉区',
+    provinceAdcodes: ['350000', '360000', '710000'],
+    zoom: 4.0,
+    summaryAsset: {
+      coordinates: [117.8, 25.8],
+      id: 'summary-southeast-mintai-gan-food',
+      size: { height: 160, width: 220 },
+      src: '/assets/food/china-food-ai.png',
+      title: '闽台赣山海米粉汇',
+      type: 'image',
+    },
+    assets: [],
+    foodItems: [],
+    quiz: {
+      question: '东南山海饮食常见米粉、汤羹与海味并重，其风味底色更接近哪一项？',
+      options: ['A. 山海鲜香与米制主食并行', 'B. 只重油炸甜食', 'C. 完全不使用海产', 'D. 只吃干粮'],
+      answerIndex: 0,
+      successReward: '解锁成功！已点亮“东南山海米粉图鉴”',
+    },
+  },
+  {
+    center: [112.4, 29.5],
+    color: '#d62828',
+    description: '江湖湖鲜、莲藕汤、剁椒腊味与夜市烟火交织出荆楚湖湘的热辣鲜香。',
+    id: 'jingchu-huxiang-food',
+    name: '荆楚湖湘热辣区',
+    provinceAdcodes: ['420000', '430000'],
+    zoom: 4.6,
+    summaryAsset: {
+      coordinates: [112.4, 29.5],
+      id: 'summary-jingchu-huxiang-food',
+      size: { height: 160, width: 220 },
+      src: '/assets/food/china-food-ai.png',
+      title: '荆楚湖湘热辣汇',
+      type: 'image',
+    },
+    assets: [],
+    foodItems: [],
+    quiz: {
+      question: '荆楚湖湘餐桌常把湖鲜、腊味和辣椒结合，其共同气质更接近哪一项？',
+      options: ['A. 清甜无油', 'B. 鲜辣下饭、烟火气浓', 'C. 只饮奶茶', 'D. 全部冷食'],
+      answerIndex: 1,
+      successReward: '解锁成功！已点亮“荆楚湖湘热辣图鉴”',
+    },
+  },
+  {
+    center: [95.6, 28.6],
+    color: '#9d4edd',
+    description: '菌菇、米线、牦牛肉、酥油茶与高原物产共同组成云藏风物，山野清香与高原温度并存。',
+    id: 'yunnan-tibet-highland-food',
+    name: '云藏高原风物区',
+    provinceAdcodes: ['530000', '540000'],
+    zoom: 3.4,
+    summaryAsset: {
+      coordinates: [95.6, 28.6],
+      id: 'summary-yunnan-tibet-highland-food',
+      size: { height: 160, width: 220 },
+      src: '/assets/food/china-food-ai.png',
+      title: '云藏高原风物汇',
+      type: 'image',
+    },
+    assets: [],
+    foodItems: [],
+    quiz: {
+      question: '云藏高原饮食中，最常体现地域生态差异的是哪类食材组合？',
+      options: ['A. 山野菌菇与高原乳肉', 'B. 只用热带水果', 'C. 只吃海鲜刺身', 'D. 完全不吃主食'],
+      answerIndex: 0,
+      successReward: '解锁成功！已点亮“云藏高原风物图鉴”',
+    },
+  },
+];
+
+const PROVINCE_NAMES = {
+  '110000': '北京',
+  '120000': '天津',
+  '130000': '河北',
+  '140000': '山西',
+  '150000': '内蒙古',
+  '210000': '辽宁',
+  '220000': '吉林',
+  '230000': '黑龙江',
+  '310000': '上海',
+  '320000': '江苏',
+  '330000': '浙江',
+  '340000': '安徽',
+  '350000': '福建',
+  '360000': '江西',
+  '370000': '山东',
+  '410000': '河南',
+  '420000': '湖北',
+  '430000': '湖南',
+  '440000': '广东',
+  '450000': '广西',
+  '460000': '海南',
+  '500000': '重庆',
+  '510000': '四川',
+  '520000': '贵州',
+  '530000': '云南',
+  '540000': '西藏',
+  '610000': '陕西',
+  '620000': '甘肃',
+  '630000': '青海',
+  '640000': '宁夏',
+  '650000': '新疆',
+  '710000': '台湾',
+  '810000': '香港',
+  '820000': '澳门',
+};
+
+const PROVINCE_COORDINATES = {
+  '110000': [116.4, 40.2],
+  '120000': [117.2, 39.12],
+  '130000': [114.48, 38.03],
+  '140000': [112.55, 37.87],
+  '150000': [111.67, 40.82],
+  '210000': [123.43, 41.8],
+  '220000': [125.32, 43.9],
+  '230000': [126.64, 45.75],
+  '310000': [121.47, 31.23],
+  '320000': [119.78, 33.04],
+  '330000': [120.15, 29.18],
+  '340000': [117.27, 31.86],
+  '350000': [119.3, 26.08],
+  '360000': [115.85, 28.68],
+  '370000': [117, 36.65],
+  '410000': [113.65, 34.76],
+  '420000': [114.3, 30.6],
+  '430000': [112.98, 28.2],
+  '440000': [113.25, 23.1],
+  '450000': [108.32, 22.81],
+  '460000': [110.35, 19],
+  '500000': [108.3, 29.5],
+  '510000': [103, 30.5],
+  '520000': [106.71, 26.57],
+  '530000': [102.72, 25.04],
+  '540000': [91.13, 29.65],
+  '610000': [108.95, 34.27],
+  '620000': [103.82, 36.06],
+  '630000': [101.78, 36.62],
+  '640000': [106.27, 38.47],
+  '650000': [87.68, 43.77],
+  '710000': [121.56, 25.04],
+  '810000': [114.17, 22.28],
+  '820000': [113.54, 22.19],
+};
+
+const PROVINCE_FOOD_IMAGE_ADCODE_SET = new Set([
+  '110000', '120000', '130000', '140000',
+  '310000', '320000', '330000', '340000',
+  '370000', '410000', '440000', '450000',
+  '460000', '500000', '510000', '520000',
+  '610000', '620000', '630000', '640000',
+  '650000', '810000', '820000',
+]);
+
+const PROVINCE_FOOD_CATALOG = {
+  '110000': ['北京烤鸭', '老北京涮羊肉', '炸酱面', '豆汁焦圈', '卤煮火烧'],
+  '120000': ['煎饼馃子', '狗不理包子', '十八街麻花', '锅巴菜', '耳朵眼炸糕'],
+  '130000': ['驴肉火烧', '金毛狮子鱼', '缸炉烧饼', '棋子烧饼', '承德杏仁露'],
+  '140000': ['刀削面', '过油肉', '莜面栲栳栳', '平遥牛肉', '太原头脑'],
+  '150000': ['手把肉', '烤全羊', '奶茶炒米', '莜面窝窝', '呼和浩特烧麦'],
+  '210000': ['锅包肉', '沟帮子熏鸡', '海城馅饼', '老边饺子', '大连海鲜焖子'],
+  '220000': ['延边冷面', '吉林白肉血肠', '打糕', '长春酱肉', '朝鲜族泡菜'],
+  '230000': ['哈尔滨红肠', '得莫利炖鱼', '大列巴', '小鸡炖蘑菇', '杀猪菜'],
+  '310000': ['小笼汤包', '生煎馒头', '葱油拌面', '本帮红烧肉', '排骨年糕'],
+  '320000': ['金陵盐水鸭', '扬州炒饭', '蟹粉狮子头', '无锡酱排骨', '苏式汤面'],
+  '330000': ['西湖醋鱼', '东坡肉', '龙井虾仁', '片儿川', '宁波汤圆'],
+  '340000': ['徽州毛豆腐', '臭鳜鱼', '李鸿章杂烩', '黄山烧饼', '淮南牛肉汤'],
+  '350000': ['佛跳墙', '沙县扁肉', '福州鱼丸', '闽南沙茶面', '土笋冻'],
+  '360000': ['南昌拌粉', '瓦罐汤', '赣南小炒鱼', '藜蒿炒腊肉', '三杯鸡'],
+  '370000': ['九转大肠', '葱烧海参', '周村烧饼', '德州扒鸡', '鲅鱼水饺'],
+  '410000': ['胡辣汤', '河南烩面', '道口烧鸡', '洛阳水席', '开封灌汤包'],
+  '420000': ['热干面', '清蒸武昌鱼', '排骨藕汤', '三鲜豆皮', '荆州鱼糕'],
+  '430000': ['剁椒鱼头', '毛氏红烧肉', '长沙臭豆腐', '小炒黄牛肉', '糖油粑粑'],
+  '440000': ['水晶虾饺', '叉烧包', '白切鸡', '广式肠粉', '顺德双皮奶'],
+  '450000': ['柳州螺蛳粉', '桂林米粉', '柠檬鸭', '南宁老友粉', '梧州纸包鸡'],
+  '460000': ['文昌鸡', '海南鸡饭', '加积鸭', '清补凉', '东山羊'],
+  '500000': ['九宫火锅', '重庆小面', '酸辣粉', '毛血旺', '歌乐山辣子鸡'],
+  '510000': ['麻婆豆腐', '回锅肉', '担担面', '夫妻肺片', '钟水饺'],
+  '520000': ['酸汤鱼', '辣子鸡', '肠旺面', '丝娃娃', '豆米火锅'],
+  '530000': ['过桥米线', '汽锅鸡', '野生菌火锅', '饵块', '宣威火腿'],
+  '540000': ['酥油茶', '糌粑', '藏式牦牛肉', '甜茶', '藏面'],
+  '610000': ['腊汁肉夹馍', '羊肉泡馍', '陕西凉皮', '裤带面', '岐山臊子面'],
+  '620000': ['牛肉拉面', '天水麻辣烫', '手抓羊肉', '陇上酿皮', '灰豆子'],
+  '630000': ['青海尕面片', '炕锅羊肉', '高原手抓羊肉', '甜醅', '青海酸奶'],
+  '640000': ['滩羊手抓', '羊肉臊子面', '宁夏烩小吃', '八宝茶', '枸杞叶面'],
+  '650000': ['新疆大盘鸡', '烤羊肉串', '手抓饭', '馕包肉', '拉条子'],
+  '710000': ['卤肉饭', '台湾牛肉面', '蚵仔煎', '珍珠奶茶', '盐酥鸡'],
+  '810000': ['丝袜奶茶', '菠萝油', '云吞面', '车仔面', '鸡蛋仔'],
+  '820000': ['葡式蛋挞', '猪扒包', '水蟹粥', '非洲鸡', '杏仁饼'],
+};
+
+const FOOD_OBJECT_POSITIONS = ['50% 50%', '52% 48%', '48% 52%', '54% 52%', '46% 50%'];
+
+function getProvinceFoodImage(area, adcode) {
+  if (PROVINCE_FOOD_IMAGE_ADCODE_SET.has(String(adcode))) return `/assets/food/${adcode}-food-ai.png`;
+  return area.summaryAsset?.src || '/assets/food/china-food-ai.png';
+}
+
+function slugifyFoodId(name) {
+  return String(name)
+    .normalize('NFKD')
+    .replace(/[^\w]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function buildFoodProcess(provinceName, foodName) {
+  return [
+    `精选${provinceName}本地代表食材`,
+    `按${foodName}传统风味处理主料`,
+    '以地方调味和火候形成标志口感',
+    '装盘呈现地域饮食记忆',
+  ];
+}
+
+function buildGeneratedFoodItem(area, adcode, foodName, catalogIndex) {
+  const provinceName = PROVINCE_NAMES[adcode] || adcode;
+  return {
+    id: `${area.id}-${adcode}-${slugifyFoodId(foodName) || `food-${catalogIndex + 1}`}`,
+    name: foodName,
+    image: getProvinceFoodImage(area, adcode),
+    provinceAdcode: adcode,
+    objectPosition: FOOD_OBJECT_POSITIONS[catalogIndex % FOOD_OBJECT_POSITIONS.length],
+    process: buildFoodProcess(provinceName, foodName),
+  };
+}
+
+function ensureAreaProvinceAssets(area) {
+  const assets = [...(area.assets || [])];
+  const existingAdcodes = new Set(assets.map((asset) => String(asset.provinceAdcode || '')));
+
+  (area.provinceAdcodes || []).forEach((adcode) => {
+    const key = String(adcode);
+    if (existingAdcodes.has(key)) return;
+    assets.push({
+      areaId: area.id,
+      provinceAdcode: key,
+      coordinates: PROVINCE_COORDINATES[key] || area.center,
+      id: `asset-${key}-food-expanded`,
+      size: { height: 130, width: 180 },
+      src: getProvinceFoodImage(area, key),
+      title: `${PROVINCE_NAMES[key] || key}特色美食图`,
+      type: 'image',
+      quiz: area.quiz,
+    });
+  });
+
+  area.assets = assets;
+}
+
+function expandAreaFoodItems(area) {
+  const nextItems = [...(area.foodItems || [])];
+
+  (area.provinceAdcodes || []).forEach((adcode) => {
+    const key = String(adcode);
+    const existingNames = new Set(nextItems
+      .filter((item) => String(item.provinceAdcode || '') === key)
+      .map((item) => item.name));
+    const catalog = PROVINCE_FOOD_CATALOG[key] || [];
+
+    catalog.forEach((foodName, index) => {
+      if (nextItems.filter((item) => String(item.provinceAdcode || '') === key).length >= 5) return;
+      if (existingNames.has(foodName)) return;
+      nextItems.push(buildGeneratedFoodItem(area, key, foodName, index));
+      existingNames.add(foodName);
+    });
+  });
+
+  area.foodItems = nextItems;
+  ensureAreaProvinceAssets(area);
+}
+
+DEFAULT_FOOD_THEME.areas.push(...ADDITIONAL_FOOD_AREAS);
+DEFAULT_FOOD_THEME.areas.forEach(expandAreaFoodItems);
 
 export const DEFAULT_CLOTHING_THEME = {
   cultureType: 'clothing',

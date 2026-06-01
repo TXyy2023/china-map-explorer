@@ -59,14 +59,15 @@ function promptForAsset(asset) {
     : `${asset.title}，${asset.name || asset.title}地域美食总览`;
 
   return [
-    'Use case: style-transfer',
-    'Asset type: contour-clipped Chinese food map artwork',
-    `Input images: the input image is the exact ${asset.title} contour reference. Use it as the mandatory silhouette and composition guide.`,
-    `Primary request: fill the inside of the provided contour with ${subject}. Food and regional scenery should slightly extend beyond the contour edge so exact mask clipping has no pale gaps.`,
-    'Style/medium: polished guofeng realistic food illustration, dimensional collage, premium web asset, dark green hand-drawn contour edge.',
-    'Composition/framing: keep the silhouette centered; put large representative dishes in the center and smaller landscape/details near the edges; avoid empty interior areas.',
-    'Lighting/mood: warm studio food lighting, refined, appetizing, competition-ready.',
-    'Constraints: preserve the input contour shape, no UI, no buttons, no watermark, no logos, no people, no large readable text.',
+    'Use case: precise-object-edit',
+    'Asset type: source image for contour-clipped interactive Chinese food map block',
+    `Edit target: the provided input image is the exact ${asset.title} map contour. It is not a loose style reference; it is the mandatory geometry, canvas, scale, rotation, position, padding, coastline, holes, and island placement.`,
+    `Primary request: keep the map silhouette exactly where it is and fill only the green contour interior with ${subject}. Convert the pale green interior into detailed food-and-landscape artwork while preserving the outer border and every small island position.`,
+    'Strict geometry rules: do not redraw, simplify, expand, shrink, rotate, recenter, crop, or invent the map outline. Do not add new land shapes. Do not remove small islands. Keep the same 800x600-style canvas framing and the same empty outside area.',
+    'Composition/framing: artwork must fill the entire contour interior, including narrow coastal areas and islands. Place large representative dishes in the broad interior and smaller regional details near edges, but never let the generated composition change the silhouette.',
+    'Style/medium: high-quality polished guofeng realistic food illustration, dimensional collage, crisp edible details, premium competition demo asset, warm appetizing light.',
+    'Background/outside contour: keep everything outside the contour flat, clean, and visually removable. No shadows, textures, scenery, or objects outside the contour.',
+    'Constraints: no UI, no buttons, no watermark, no logos, no people, no large readable text.',
   ].join('\n');
 }
 
@@ -115,7 +116,7 @@ function buildDefaultAssets() {
     ...asset,
     model: process.env.IMAGE_GEN_MODEL || 'gpt-image-2',
     prompt: promptForAsset(asset),
-    quality: process.env.IMAGE_GEN_QUALITY || 'medium',
+    quality: process.env.IMAGE_GEN_QUALITY || 'high',
     size: process.env.IMAGE_GEN_SIZE || 'auto',
   }));
 }
@@ -177,6 +178,15 @@ export async function updateImageAsset(assetId, patch) {
   return assets[index];
 }
 
+function sanitizeAssetPatch(patch = {}) {
+  const next = {};
+  if (typeof patch.prompt === 'string') next.prompt = patch.prompt;
+  if (typeof patch.model === 'string' && patch.model.trim()) next.model = patch.model.trim();
+  if (typeof patch.quality === 'string' && patch.quality.trim()) next.quality = patch.quality.trim();
+  if (typeof patch.size === 'string' && patch.size.trim()) next.size = patch.size.trim();
+  return next;
+}
+
 function getImageApiBaseUrl() {
   return (process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/+$/, '');
 }
@@ -218,15 +228,14 @@ async function callImageEditApi(asset) {
   return Buffer.from(imageBase64, 'base64');
 }
 
-export async function regenerateImageAsset(assetId, prompt) {
-  let asset = await updateImageAsset(assetId, prompt ? { prompt } : {});
+async function clipAssetOutput(asset) {
   const sourcePath = publicToFilePath(asset.sourceImage);
   const outputPath = publicToFilePath(asset.outputImage);
   const contourPath = publicToFilePath(asset.inputImage);
 
-  const generatedBytes = await callImageEditApi(asset);
-  await mkdir(dirname(sourcePath), { recursive: true });
-  await writeFile(sourcePath, generatedBytes);
+  if (!(await pathExists(sourcePath))) {
+    throw new Error(`AI 源图不存在，无法裁切：${asset.sourceImage}`);
+  }
 
   await execFileAsync('python3', [
     clipScriptPath,
@@ -234,8 +243,34 @@ export async function regenerateImageAsset(assetId, prompt) {
     '--contour', contourPath,
     '--out', outputPath,
   ], { cwd: projectRoot });
+}
+
+export async function clipImageAsset(assetId, patch = {}) {
+  let asset = await updateImageAsset(assetId, sanitizeAssetPatch(patch));
+  await clipAssetOutput(asset);
+  asset = await updateImageAsset(assetId, {
+    clippedAt: new Date().toISOString(),
+  });
+
+  return {
+    asset,
+    cacheBust: Date.now(),
+  };
+}
+
+export async function regenerateImageAsset(assetId, patch = {}) {
+  const normalizedPatch = typeof patch === 'string' ? { prompt: patch } : sanitizeAssetPatch(patch);
+  let asset = await updateImageAsset(assetId, normalizedPatch);
+  const sourcePath = publicToFilePath(asset.sourceImage);
+
+  const generatedBytes = await callImageEditApi(asset);
+  await mkdir(dirname(sourcePath), { recursive: true });
+  await writeFile(sourcePath, generatedBytes);
+
+  await clipAssetOutput(asset);
 
   asset = await updateImageAsset(assetId, {
+    clippedAt: new Date().toISOString(),
     generatedAt: new Date().toISOString(),
     lastSourceBytes: generatedBytes.length,
   });

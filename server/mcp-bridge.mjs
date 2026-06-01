@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { readImageAssets, regenerateImageAsset, updateImageAsset } from './image-assets.mjs';
+import { clipImageAsset, readImageAssets, regenerateImageAsset, updateImageAsset } from './image-assets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataPath = resolve(__dirname, 'data/food-map-config.json');
@@ -224,7 +224,7 @@ app.get('/api/assets', async (c) => {
       settings: {
         apiBaseUrl: process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || 'https://api.openai.com/v1',
         model: process.env.IMAGE_GEN_MODEL || 'gpt-image-2',
-        quality: process.env.IMAGE_GEN_QUALITY || 'medium',
+        quality: process.env.IMAGE_GEN_QUALITY || 'high',
         size: process.env.IMAGE_GEN_SIZE || 'auto',
       },
     });
@@ -240,9 +240,12 @@ app.patch('/api/assets/:assetId', async (c) => {
   try {
     const assetId = decodeURIComponent(c.req.param('assetId'));
     const body = await c.req.json();
-    const asset = await updateImageAsset(assetId, {
-      prompt: String(body.prompt || ''),
-    });
+    const patch = {};
+    if (typeof body.prompt === 'string') patch.prompt = body.prompt;
+    if (typeof body.model === 'string') patch.model = body.model;
+    if (typeof body.quality === 'string') patch.quality = body.quality;
+    if (typeof body.size === 'string') patch.size = body.size;
+    const asset = await updateImageAsset(assetId, patch);
     return c.json({ asset, ok: true });
   } catch (error) {
     return c.json({
@@ -256,7 +259,21 @@ app.post('/api/assets/:assetId/regenerate', async (c) => {
   try {
     const assetId = decodeURIComponent(c.req.param('assetId'));
     const body = await c.req.json().catch(() => ({}));
-    const result = await regenerateImageAsset(assetId, body.prompt ? String(body.prompt) : undefined);
+    const result = await regenerateImageAsset(assetId, body);
+    return c.json({ ...result, ok: true });
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+    }, 400);
+  }
+});
+
+app.post('/api/assets/:assetId/clip', async (c) => {
+  try {
+    const assetId = decodeURIComponent(c.req.param('assetId'));
+    const body = await c.req.json().catch(() => ({}));
+    const result = await clipImageAsset(assetId, body);
     return c.json({ ...result, ok: true });
   } catch (error) {
     return c.json({
