@@ -1,0 +1,115 @@
+{
+  "description": "用地图浏览中国地域美食文化，AI 图片直接放置在文化区地图中。",
+  "id": "chinese-food-map",
+  "name": "中华美食文化地图",
+  "areas": [
+    {
+      "center": [
+        104.7,
+        30.4
+      ],
+      "color": "#d84b32",
+      "description": "麻辣火锅、豆花、串串与江湖菜共同构成热烈的川渝味觉。",
+      "id": "sichuan-chongqing-food",
+      "name": "川渝麻辣美食区",
+      "provinceAdcodes": [
+        "500000",
+        "510000"
+      ],
+      "zoom": 5.1,
+      "assets": [
+        {
+          "areaId": "sichuan-chongqing-food",
+          "coordinates": [
+            104.7,
+            30.4
+          ],
+          "id": "asset-sichuan-hotpot-ai",
+          "size": {
+            "height": 160,
+            "width": 260
+          },
+          "src": "/assets/food/sichuan-hotpot-ai.png",
+          "title": "川渝火锅 AI 图像",
+          "type": "image"
+        }
+      ]
+    },
+    {
+      "center": [
+        119.6,
+        31.2
+      ],
+      "color": "#2f9d8a",
+      "description": "小笼、汤包、糕团、鲜食与水乡风物形成细腻的江南食谱。",
+      "id": "jiangnan-snack-food",
+      "name": "江南点心鲜食区",
+      "provinceAdcodes": [
+        "310000",
+        "320000",
+        "330000",
+        "340000"
+      ],
+      "zoom": 4.5,
+      "assets": []
+    },
+    {
+      "center": [
+        113.9,
+        22.8
+      ],
+      "color": "#d7982f",
+      "description": "早茶、烧腊、海味与骑楼市井串联出岭南餐桌。",
+      "id": "lingnan-dim-sum-food",
+      "name": "岭南早茶海味区",
+      "provinceAdcodes": [
+        "440000",
+        "450000",
+        "460000",
+        "810000",
+        "820000"
+      ],
+      "zoom": 4.3,
+      "assets": []
+    },
+    {
+      "center": [
+        95.6,
+        38.9
+      ],
+      "color": "#7b9043",
+      "description": "面食、羊肉、香料与绿洲集市让西北味道有清晰的地理线索。",
+      "id": "northwest-noodle-food",
+      "name": "西北面食香料区",
+      "provinceAdcodes": [
+        "610000",
+        "620000",
+        "630000",
+        "640000",
+        "650000"
+      ],
+      "zoom": 3.2,
+      "assets": []
+    },
+    {
+      "center": [
+        114.2,
+        37.1
+      ],
+      "color": "#5b78b7",
+      "description": "面点、鲁菜、豫菜与宴席传统共同组成北方餐桌骨架。",
+      "id": "northern-banquet-food",
+      "name": "北方宴席面点区",
+      "provinceAdcodes": [
+        "110000",
+        "120000",
+        "130000",
+        "370000",
+        "140000",
+        "410000"
+      ],
+      "zoom": 4,
+      "assets": []
+    }
+  ]
+}

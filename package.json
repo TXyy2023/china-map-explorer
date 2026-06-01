@@ -1,0 +1,33 @@
+{
+  "name": "china-map-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n MCP,WEB -c blue,green \"npm:dev:mcp\" \"npm:dev:web\"",
+    "dev:mcp": "node server/mcp-bridge.mjs",
+    "dev:web": "vite --host 0.0.0.0 --port 5174 --strictPort",
+    "build": "vite build",
+    "preview": "vite --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.4",
+    "@hookform/resolvers": "^5.4.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tanstack/react-query": "^5.100.14",
+    "@vitejs/plugin-react": "^5.1.1",
+    "@xstate/react": "^6.1.0",
+    "concurrently": "^10.0.0",
+    "d3-geo": "^3.1.1",
+    "hono": "^4.12.23",
+    "lucide-react": "^0.511.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.77.0",
+    "react-simple-maps": "^3.0.0",
+    "vite": "^7.2.6",
+    "xstate": "^5.32.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
+  }
+}

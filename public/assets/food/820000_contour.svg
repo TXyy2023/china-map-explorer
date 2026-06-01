@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <!-- 背景色，采用淡米黄色 -->
+  <rect width="100%" height="100%" fill="#f5f2eb" />
+  
+  <!-- 阴影层 -->
+  <path d="M326.62,560L571.22,436.154L433.633,128.016L348.02,40L247.122,53.755L228.78,229.797L326.62,386.624ZM485.606,95.011L433.633,95.011L433.633,128.016Z" fill="#d1e7dd" opacity="0.3" transform="translate(5, 8)" />
+  
+  <!-- 填充与主轮廓 -->
+  <path d="M326.62,560L571.22,436.154L433.633,128.016L348.02,40L247.122,53.755L228.78,229.797L326.62,386.624ZM485.606,95.011L433.633,95.011L433.633,128.016Z" fill="#e6f4ea" stroke="#137333" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" />
+  
+  <!-- 内发光描边 -->
+  <path d="M326.62,560L571.22,436.154L433.633,128.016L348.02,40L247.122,53.755L228.78,229.797L326.62,386.624ZM485.606,95.011L433.633,95.011L433.633,128.016Z" fill="none" stroke="#2e7d32" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.6" />
+</svg>
