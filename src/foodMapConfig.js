@@ -5,7 +5,7 @@
  */
 
 // 本地持久化缓存地图状态的 localStorage key 键名
-export const STORAGE_KEY = 'agy-food-culture-map-v3';
+export const STORAGE_KEY = 'agy-culture-map-v4';
 
 // 初始默认的川渝火锅 AI 绘图资源配置
 export const FOOD_IMAGE_ASSET = {
@@ -21,12 +21,25 @@ export const FOOD_IMAGE_ASSET = {
 // 预设六大美食文化区及关联的省级行政 adcode
 // 每一个区域均精心定制了主题色、中心坐标、缩放级别以及国风趣味答题题库
 export const DEFAULT_FOOD_THEME = {
+  cultureType: 'food',
+  moduleId: 'food',
   chinaAsset: {
     id: 'china-food-summary',
     src: '/assets/food/china-food-ai.png',
   },
   description: '重构暗色国风设计，用智能地图探寻华夏大地传统地域美食与人文典故。',
+  features: {
+    aiRegionFill: false,
+    itemPins: true,
+    itemSpotlight: true,
+  },
   id: 'chinese-food-map-agy',
+  labels: {
+    countryTitle: '可交互中国美食地图',
+    mapSubtitle: '地图轮廓 / 食物小图点位优先',
+    sidebarTitle: '华夏珍馐文化地图',
+    topbarMeta: 'Interactive Culture Map',
+  },
   name: '华夏珍馐文化地图',
   areas: [
     {
@@ -44,6 +57,25 @@ export const DEFAULT_FOOD_THEME = {
         src: '/assets/food/sichuan-chongqing-food-summary.png',
         title: '巴蜀川渝美食汇',
         type: 'image',
+      },
+      // 每个文化小图都可以独立指定地图点位和选中后的弹出位置。
+      itemPlacements: {
+        'sichuan-hotpot-bowl': {
+          pin: { x: '82%', y: '24%' },
+          spotlight: { x: '74%', y: '42%' },
+        },
+        'mapo-tofu': {
+          pin: { x: '88%', y: '42%' },
+          spotlight: { x: '74%', y: '58%' },
+        },
+        'chongqing-noodle': {
+          pin: { x: '17%', y: '38%' },
+          spotlight: { x: '30%', y: '54%' },
+        },
+        'twice-cooked-pork': {
+          pin: { x: '22%', y: '66%' },
+          spotlight: { x: '34%', y: '74%' },
+        },
       },
       foodItems: [
         {
