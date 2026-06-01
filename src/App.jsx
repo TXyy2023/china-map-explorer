@@ -11,10 +11,14 @@ import {
   MapPin,
   MousePointer2,
   RefreshCw,
+  Shirt,
 } from 'lucide-react';
 import {
+  CULTURE_THEMES,
   buildProvinceAreaMap,
+  getDefaultAreaId,
   getAreaById,
+  getThemeById,
 } from './foodMapConfig.js';
 import {
   getCultureModule,
@@ -91,6 +95,26 @@ function buildImageFrame(targetBounds, bitmapBounds) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function hashString(input = '') {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let t = value;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function useElementSize(fallback = FALLBACK_STAGE_SIZE) {
@@ -180,8 +204,8 @@ function useBitmapVisibleBounds(src) {
 function getAssetForView(theme, viewLevel, area, provinceAdcode) {
   if (viewLevel === 'country') {
     return {
-      src: theme.chinaAsset?.src || '/assets/food/china-food-ai.png',
-      title: '全国美食大盘',
+      src: theme.chinaAsset?.src || (theme.moduleId === 'food' ? '/assets/food/china-food-ai.png' : ''),
+      title: theme.labels?.sidebarTitle || theme.name,
     };
   }
 
@@ -204,34 +228,157 @@ function formatProvinceName(feature) {
   return feature?.properties?.name || feature?.properties?.fullname || '未知区块';
 }
 
-function CultureMapPins({
+function pointFromFeature(feature, pathGenerator, fallbackPoint) {
+  if (!feature || !pathGenerator) return fallbackPoint;
+  const centroid = pathGenerator.centroid(feature);
+  if (Number.isFinite(centroid?.[0]) && Number.isFinite(centroid?.[1])) {
+    return { x: centroid[0], y: centroid[1] };
+  }
+  const bounds = boundsFromFeatures([feature], pathGenerator);
+  if (bounds) return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+  return fallbackPoint;
+}
+
+function buildCurvePath(origin, target, random) {
+  const distance = Math.hypot(target.x - origin.x, target.y - origin.y);
+  const lift = clamp(distance * 0.18, 34, 88);
+  const side = random() > 0.5 ? 1 : -1;
+  const control = {
+    x: (origin.x + target.x) / 2 + side * (24 + random() * 64),
+    y: (origin.y + target.y) / 2 - lift + (random() - 0.5) * 42,
+  };
+  return `M ${origin.x.toFixed(1)} ${origin.y.toFixed(1)} Q ${control.x.toFixed(1)} ${control.y.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`;
+}
+
+function targetPointForItem({ areaBounds, index, itemCount, origin, random, stageSize }) {
+  const safeX = 66;
+  const safeTop = 66;
+  const safeBottom = 82;
+  const area = areaBounds || {
+    x: stageSize.width * 0.22,
+    y: stageSize.height * 0.18,
+    w: stageSize.width * 0.56,
+    h: stageSize.height * 0.58,
+  };
+  const rowOffset = itemCount > 1 ? (index - (itemCount - 1) / 2) * 72 : 0;
+  const slots = [
+    { x: area.x + area.w + 98, y: area.y + area.h * 0.22 + rowOffset },
+    { x: area.x + area.w + 112, y: area.y + area.h * 0.68 + rowOffset },
+    { x: area.x - 94, y: area.y + area.h * 0.3 + rowOffset },
+    { x: area.x - 104, y: area.y + area.h * 0.76 + rowOffset },
+    { x: area.x + area.w * 0.24 + rowOffset, y: area.y - 68 },
+    { x: area.x + area.w * 0.76 + rowOffset, y: area.y + area.h + 76 },
+  ];
+  const slot = slots[(index + Math.floor(random() * slots.length)) % slots.length];
+  let target = {
+    x: slot.x + (random() - 0.5) * 82,
+    y: slot.y + (random() - 0.5) * 72,
+  };
+
+  target.x = clamp(target.x, safeX, stageSize.width - safeX);
+  target.y = clamp(target.y, safeTop, stageSize.height - safeBottom);
+
+  if (Math.hypot(target.x - origin.x, target.y - origin.y) < 86) {
+    target = {
+      x: clamp(stageSize.width - origin.x + (random() - 0.5) * 120, safeX, stageSize.width - safeX),
+      y: clamp(origin.y + (random() - 0.5) * 180, safeTop, stageSize.height - safeBottom),
+    };
+  }
+
+  return target;
+}
+
+function buildCultureItemLayouts({
   activeArea,
+  areaBounds,
+  cultureModule,
+  features,
+  nonce,
+  pathGenerator,
+  selectedProvinceAdcode,
+  stageSize,
+}) {
+  const items = normalizeCultureItems(activeArea, cultureModule);
+  if (!activeArea || !items.length || !stageSize.width || !stageSize.height) return [];
+
+  const areaCenter = areaBounds
+    ? { x: areaBounds.x + areaBounds.w / 2, y: areaBounds.y + areaBounds.h / 2 }
+    : { x: stageSize.width / 2, y: stageSize.height / 2 };
+  const itemCount = items.length;
+
+  return items.map((item, index) => {
+    const random = seededRandom(hashString(`${activeArea.id}:${item.id}:${index}:${nonce}:${stageSize.width}:${stageSize.height}`));
+    const provinceFeature = features.find((feature) => String(feature.properties.adcode) === String(item.provinceAdcode));
+    const origin = pointFromFeature(provinceFeature, pathGenerator, areaCenter);
+    const target = targetPointForItem({ areaBounds, index, itemCount, origin, random, stageSize });
+    const selectedProvince = selectedProvinceAdcode ? String(selectedProvinceAdcode) : '';
+    const itemProvince = item.provinceAdcode ? String(item.provinceAdcode) : '';
+
+    return {
+      ...item,
+      curvePath: buildCurvePath(origin, target, random),
+      dimmed: Boolean(selectedProvince && itemProvince && itemProvince !== selectedProvince),
+      focused: Boolean(selectedProvince && itemProvince && itemProvince === selectedProvince),
+      origin,
+      target,
+      travel: {
+        x: origin.x - target.x,
+        y: origin.y - target.y,
+      },
+    };
+  });
+}
+
+function CultureMapPins({
   assetVersions,
   cultureModule,
+  itemLayouts,
+  layerPhase,
   onSelectFood,
   selectedFood,
 }) {
-  const items = useMemo(
-    () => normalizeCultureItems(activeArea, cultureModule),
-    [activeArea, cultureModule],
-  );
-  if (!activeArea || !items.length) return null;
+  if (!itemLayouts.length) return null;
 
   return (
-    <div className="culture-map-pins" aria-label={`${activeArea.name}${cultureModule.itemNoun}`}>
-      {items.map((item) => {
+    <div className={`culture-map-pins ${layerPhase === 'leaving' ? 'is-leaving' : 'is-active'}`} aria-label={cultureModule.itemNoun}>
+      <svg className="culture-pin-curves" aria-hidden="true">
+        {itemLayouts.map((item) => (
+          <g className={item.dimmed ? 'is-dimmed' : ''} key={`curve-${item.id}`}>
+            <path
+              className="culture-origin-curve"
+              d={item.curvePath}
+              style={{ '--food-accent': item.accent }}
+            />
+            <circle
+              className="culture-origin-dot"
+              cx={item.origin.x}
+              cy={item.origin.y}
+              r={item.focused ? 4.6 : 3.4}
+              style={{ '--food-accent': item.accent }}
+            />
+          </g>
+        ))}
+      </svg>
+
+      {itemLayouts.map((item) => {
         const selected = selectedFood?.id === item.id;
-        const placement = item.placement?.pin || { x: '82%', y: '38%' };
         return (
           <button
             aria-pressed={selected}
-            className={`culture-pin ${selected ? 'is-selected' : ''}`}
+            className={[
+              'culture-pin',
+              selected ? 'is-selected' : '',
+              item.dimmed ? 'is-dimmed' : '',
+              item.focused ? 'is-province-focus' : '',
+            ].join(' ')}
             key={item.id}
             onClick={() => onSelectFood(item)}
             style={{
-              '--food-accent': item.accent || activeArea.color,
-              '--pin-x': placement.x,
-              '--pin-y': placement.y,
+              '--food-accent': item.accent,
+              '--pin-x': `${item.target.x}px`,
+              '--pin-y': `${item.target.y}px`,
+              '--travel-x': `${item.travel.x}px`,
+              '--travel-y': `${item.travel.y}px`,
             }}
             title={item.name}
             type="button"
@@ -249,34 +396,6 @@ function CultureMapPins({
         );
       })}
     </div>
-  );
-}
-
-function SelectedFoodSpotlight({ assetVersions, cultureModule, selectedFood }) {
-  if (!selectedFood) return null;
-  const placement = selectedFood.placement?.spotlight || { x: '72%', y: '56%' };
-
-  return (
-    <aside
-      className="food-popout"
-      style={{
-        '--food-accent': selectedFood.accent,
-        '--spotlight-x': placement.x,
-        '--spotlight-y': placement.y,
-      }}
-    >
-      <img
-        alt={selectedFood.name}
-        draggable="false"
-        src={withVersion(selectedFood.image, assetVersions)}
-        style={{ objectPosition: selectedFood.objectPosition || '50% 50%' }}
-      />
-      <div>
-        <span>{selectedFood.areaName}</span>
-        <strong>{selectedFood.name}</strong>
-        <small>{cultureModule.processTitle} · {cultureModule.quizTitle}</small>
-      </div>
-    </aside>
   );
 }
 
@@ -300,6 +419,10 @@ function InteractiveMap({
 }) {
   const [stageRef, stageSize] = useElementSize();
   const [cursor, setCursor] = useState(null);
+  const hoverClearTimerRef = useRef(null);
+  const pinClearTimerRef = useRef(null);
+  const pinLayerAreaRef = useRef(null);
+  const [pinLayer, setPinLayer] = useState({ area: null, phase: 'hidden', nonce: 0 });
   const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
 
   const { data: chinaGeoJson, isLoading, error } = useQuery({
@@ -381,11 +504,66 @@ function InteractiveMap({
   const fillSrc = showAiFill && fillAsset?.src ? withVersion(fillAsset.src, assetVersions) : '';
   const bitmapBounds = useBitmapVisibleBounds(fillSrc);
   const imageFrame = buildImageFrame(fillTargetBounds, bitmapBounds);
-  const activeAreaForFood = viewLevel === 'country'
-    ? getAreaById(theme, hoveredAreaId || currentArea?.id)
+  const activeAreaForItems = viewLevel === 'country'
+    ? getAreaById(theme, hoveredAreaId)
     : currentArea;
+  const pinLayouts = useMemo(
+    () => buildCultureItemLayouts({
+      activeArea: pinLayer.area,
+      areaBounds,
+      cultureModule,
+      features,
+      nonce: pinLayer.nonce,
+      pathGenerator,
+      selectedProvinceAdcode,
+      stageSize,
+    }),
+    [areaBounds, cultureModule, features, pathGenerator, pinLayer.area, pinLayer.nonce, selectedProvinceAdcode, stageSize],
+  );
+  const focusKey = `${viewLevel}:${currentArea?.id || 'country'}:${selectedProvinceAdcode || 'all'}`;
+
+  useEffect(() => () => {
+    window.clearTimeout(hoverClearTimerRef.current);
+    window.clearTimeout(pinClearTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    window.clearTimeout(pinClearTimerRef.current);
+
+    if (activeAreaForItems) {
+      setPinLayer((prev) => {
+        const sameArea = prev.area?.id === activeAreaForItems.id;
+        const sameMode = prev.modeKey === `${viewLevel}:${activeAreaForItems.id}`;
+        const next = {
+          area: activeAreaForItems,
+          modeKey: `${viewLevel}:${activeAreaForItems.id}`,
+          nonce: sameArea && sameMode && prev.phase !== 'leaving' ? prev.nonce : prev.nonce + 1,
+          phase: 'active',
+        };
+        pinLayerAreaRef.current = next.area;
+        return next;
+      });
+      return undefined;
+    }
+
+    if (pinLayerAreaRef.current) {
+      setPinLayer((prev) => ({ ...prev, phase: 'leaving' }));
+      pinClearTimerRef.current = window.setTimeout(() => {
+        pinLayerAreaRef.current = null;
+        setPinLayer((prev) => ({
+          area: null,
+          modeKey: '',
+          nonce: prev.nonce,
+          phase: 'hidden',
+        }));
+      }, 360);
+    }
+
+    return undefined;
+  }, [activeAreaForItems, viewLevel]);
 
   function handlePointerMove(event, feature, area) {
+    window.clearTimeout(hoverClearTimerRef.current);
     const rect = stageRef.current?.getBoundingClientRect();
     if (rect) {
       setCursor({
@@ -396,7 +574,19 @@ function InteractiveMap({
       });
     }
     onHoverProvince(String(feature.properties.adcode));
-    if (area) setHoveredAreaId(area.id);
+    if (viewLevel === 'country') {
+      setHoveredAreaId(area?.id || null);
+    }
+  }
+
+  function clearCountryHoverWithAnimation() {
+    onHoverProvince(null);
+    setCursor(null);
+    if (viewLevel !== 'country') return;
+    window.clearTimeout(hoverClearTimerRef.current);
+    hoverClearTimerRef.current = window.setTimeout(() => {
+      setHoveredAreaId(null);
+    }, 90);
   }
 
   function selectFeature(feature) {
@@ -410,24 +600,33 @@ function InteractiveMap({
       onSelectArea(area.id);
       return;
     }
-    onSelectProvince(adcode);
+    onSelectProvince(adcode, formatProvinceName(feature));
   }
 
   return (
-    <section className="map-stage" ref={stageRef}>
+    <section
+      className="map-stage"
+      onMouseLeave={() => {
+        window.clearTimeout(hoverClearTimerRef.current);
+        onHoverProvince(null);
+        setCursor(null);
+        if (viewLevel === 'country') setHoveredAreaId(null);
+      }}
+      ref={stageRef}
+    >
       <div className="map-hud">
         <span><MousePointer2 size={14} aria-hidden="true" /> Hover / Click</span>
         <strong>
           {viewLevel === 'country'
             ? '全国总览'
             : viewLevel === 'area'
-              ? currentArea?.name
+              ? currentArea?.name || '待配置区块'
               : formatProvinceName(selectedProvinceFeature)}
         </strong>
       </div>
 
       <svg
-        aria-label="可交互中国美食地图"
+        aria-label={theme.labels?.countryTitle || theme.name}
         className="map-svg"
         height={stageSize.height}
         role="img"
@@ -460,12 +659,14 @@ function InteractiveMap({
           />
         )}
 
-        <g className="province-layer">
+        <g className="province-layer" key={focusKey}>
           {features.map((feature) => {
             const adcode = String(feature.properties.adcode);
             const area = provinceAreaMap.get(adcode);
             const inCurrentArea = currentAreaAdcodes.has(adcode);
-            const hiddenByArea = (viewLevel === 'area' || viewLevel === 'province') && !inCurrentArea;
+            const hiddenByArea = (viewLevel === 'area' || viewLevel === 'province')
+              && currentAreaAdcodes.size > 0
+              && !inCurrentArea;
             const selected = adcode === String(selectedProvinceAdcode);
             const hovered = adcode === String(hoveredAdcode);
             const d = pathGenerator(feature) || '';
@@ -491,10 +692,7 @@ function InteractiveMap({
                   }
                 }}
                 onMouseEnter={(event) => handlePointerMove(event, feature, area)}
-                onMouseLeave={() => {
-                  onHoverProvince(null);
-                  setCursor(null);
-                }}
+                onMouseLeave={clearCountryHoverWithAnimation}
                 onMouseMove={(event) => handlePointerMove(event, feature, area)}
                 role="button"
                 style={{ '--area-color': area?.color || '#64748b' }}
@@ -520,24 +718,17 @@ function InteractiveMap({
       {cursor && (
         <div className="hover-card" style={{ left: cursor.x, top: cursor.y }}>
           <strong>{formatProvinceName(cursor.feature)}</strong>
-          <span>{cursor.area?.name || '未绑定美食区块'}</span>
+          <span>{cursor.area?.name || `未绑定${cultureModule.label}区块`}</span>
         </div>
       )}
 
       {showFoodPins && (
         <CultureMapPins
-          activeArea={activeAreaForFood}
           assetVersions={assetVersions}
           cultureModule={cultureModule}
+          itemLayouts={pinLayouts}
+          layerPhase={pinLayer.phase}
           onSelectFood={onSelectFood}
-          selectedFood={selectedFood}
-        />
-      )}
-
-      {showFoodPins && cultureModule.features.itemSpotlight && (
-        <SelectedFoodSpotlight
-          assetVersions={assetVersions}
-          cultureModule={cultureModule}
           selectedFood={selectedFood}
         />
       )}
@@ -566,6 +757,12 @@ function DetailPanel({
   }, [selectedFood?.id]);
 
   const selectedQuiz = selectedFood?.quiz;
+  const currentItems = useMemo(
+    () => normalizeCultureItems(currentArea, cultureModule),
+    [currentArea, cultureModule],
+  );
+  const hasCultureAreas = Boolean(theme.areas?.length);
+  const showEmptyState = !selectedFood && (!hasCultureAreas || !currentItems.length);
 
   return (
     <aside className="panel detail-panel">
@@ -586,8 +783,10 @@ function DetailPanel({
       </div>
 
       <p className="panel-copy">
-        {viewLevel === 'country'
-          ? `点击任意省份进入对应文化区块；悬停时地图会高亮省份并切换${cultureModule.itemNoun}点位。`
+        {!hasCultureAreas
+          ? theme.labels?.emptyState || '暂无文化区块配置。'
+          : viewLevel === 'country'
+            ? `点击任意省份进入对应文化区块；悬停时地图会高亮省份并切换${cultureModule.itemNoun}点位。`
           : viewLevel === 'area'
             ? currentArea?.description
             : `当前展示 ${activeAsset?.title || selectedProvinceName || '省份'} 的地图区块，可继续点击${cultureModule.itemNoun}查看题目与做法。`}
@@ -612,8 +811,24 @@ function DetailPanel({
         </button>
       </div>
 
+      {showEmptyState && (
+        <section className="empty-culture-state">
+          <strong>{theme.labels?.emptyState || `暂无${cultureModule.label}内容`}</strong>
+          <span>{cultureModule.itemNoun}未配置 · {cultureModule.processTitle}待填充 · {cultureModule.quizTitle}待填充</span>
+        </section>
+      )}
+
       {selectedFood && (
         <section className="selected-culture-item">
+          <figure className="selected-item-hero">
+            <img
+              alt={`${selectedFood.name}大图`}
+              src={withVersion(selectedFood.image, assetVersions)}
+              style={{ objectPosition: selectedFood.objectPosition || '50% 50%' }}
+            />
+            <figcaption>{selectedFood.name}</figcaption>
+          </figure>
+
           <div className="selected-item-head">
             <img
               alt={selectedFood.name}
@@ -682,12 +897,15 @@ function DetailPanel({
 
 function App() {
   const theme = useFoodMapStore((state) => state.theme);
+  const activeThemeId = useFoodMapStore((state) => state.activeThemeId);
   const resetTheme = useFoodMapStore((state) => state.resetTheme);
+  const setThemeById = useFoodMapStore((state) => state.setThemeById);
   const cultureModule = useMemo(() => getCultureModule(theme), [theme]);
   const [viewLevel, setViewLevel] = useState('country');
   const [selectedAreaId, setSelectedAreaId] = useState(DEFAULT_AREA_ID);
-  const [hoveredAreaId, setHoveredAreaId] = useState(DEFAULT_AREA_ID);
+  const [hoveredAreaId, setHoveredAreaId] = useState(null);
   const [selectedProvinceAdcode, setSelectedProvinceAdcode] = useState(null);
+  const [selectedProvinceLabel, setSelectedProvinceLabel] = useState('');
   const [hoveredAdcode, setHoveredAdcode] = useState(null);
   const [selectedFood, setSelectedFood] = useState(null);
   const showAiFill = theme.features?.aiRegionFill === true && cultureModule.features.aiRegionFill === true;
@@ -701,8 +919,8 @@ function App() {
     if (!selectedProvinceAdcode) return '';
     const area = provinceAreaMap.get(String(selectedProvinceAdcode));
     const asset = area?.assets?.find((item) => String(item.provinceAdcode) === String(selectedProvinceAdcode));
-    return asset?.title || selectedProvinceAdcode;
-  }, [provinceAreaMap, selectedProvinceAdcode]);
+    return asset?.title || selectedProvinceLabel || selectedProvinceAdcode;
+  }, [provinceAreaMap, selectedProvinceAdcode, selectedProvinceLabel]);
 
   const activeMapAsset = getAssetForView(theme, viewLevel, currentArea, selectedProvinceAdcode);
 
@@ -711,37 +929,64 @@ function App() {
     document.body.className = 'app-document';
   }, []);
 
+  function resetViewForTheme(nextTheme, message) {
+    const nextAreaId = getDefaultAreaId(nextTheme);
+    setSelectedAreaId(nextAreaId);
+    setHoveredAreaId(null);
+    setSelectedProvinceAdcode(null);
+    setSelectedProvinceLabel('');
+    setHoveredAdcode(null);
+    setSelectedFood(null);
+    setViewLevel('country');
+    setNotice(message);
+  }
+
+  function switchCultureTheme(themeId) {
+    const nextTheme = getThemeById(themeId);
+    setThemeById(nextTheme.id);
+    resetViewForTheme(nextTheme, `已切换到 ${nextTheme.name}。`);
+  }
+
   function selectArea(areaId) {
     const area = getAreaById(theme, areaId);
+    if (!area) {
+      setNotice(`${theme.name} 暂无可进入的大区配置。`);
+      return;
+    }
     setSelectedAreaId(area.id);
-    setHoveredAreaId(area.id);
+    setHoveredAreaId(null);
     setSelectedProvinceAdcode(null);
+    setSelectedProvinceLabel('');
     setSelectedFood(null);
     setViewLevel('area');
     setNotice(`已进入 ${area.name}，可点击省份或${cultureModule.itemNoun}继续查看。`);
   }
 
-  function selectProvince(adcode) {
+  function selectProvince(adcode, provinceName = '') {
     const area = provinceAreaMap.get(String(adcode));
     if (area) {
       setSelectedAreaId(area.id);
-      setHoveredAreaId(area.id);
+      setHoveredAreaId(null);
     }
     setSelectedProvinceAdcode(String(adcode));
+    setSelectedProvinceLabel(provinceName);
     setViewLevel('province');
-    setNotice(`已选择省份区块：${String(adcode)}。`);
+    setNotice(`已选择省份区块：${provinceName || String(adcode)}。`);
   }
 
   function selectFood(food) {
     setSelectedFood(food);
     if (food.areaId) {
       setSelectedAreaId(food.areaId);
-      setHoveredAreaId(food.areaId);
+      setHoveredAreaId(null);
     }
     if (food.provinceAdcode) {
       setSelectedProvinceAdcode(String(food.provinceAdcode));
+      setSelectedProvinceLabel('');
       setViewLevel('province');
     } else {
+      setSelectedProvinceAdcode(null);
+      setSelectedProvinceLabel('');
       setViewLevel('area');
     }
     setNotice(`已选中${cultureModule.itemNoun}：${food.name}。`);
@@ -750,13 +995,22 @@ function App() {
   function backCountry() {
     setViewLevel('country');
     setSelectedProvinceAdcode(null);
+    setSelectedProvinceLabel('');
+    setHoveredAreaId(null);
     setSelectedFood(null);
     setNotice('已返回全国交互地图。');
   }
 
   function backArea() {
+    if (!currentArea) {
+      backCountry();
+      setNotice(`${theme.name} 暂无大区配置。`);
+      return;
+    }
     setViewLevel('area');
     setSelectedProvinceAdcode(null);
+    setSelectedProvinceLabel('');
+    setHoveredAreaId(null);
     setSelectedFood(null);
     setNotice(`已返回 ${currentArea.name}。`);
   }
@@ -768,16 +1022,33 @@ function App() {
           <MapPin size={20} aria-hidden="true" />
           <span>{theme.name}</span>
         </button>
+        <div className="culture-tabs" aria-label="文化地图类型">
+          {CULTURE_THEMES.map((cultureTheme) => {
+            const selected = (activeThemeId || theme.id) === cultureTheme.id;
+            return (
+              <button
+                className={selected ? 'is-active' : ''}
+                key={cultureTheme.id}
+                onClick={() => switchCultureTheme(cultureTheme.id)}
+                type="button"
+              >
+                {cultureTheme.moduleId === 'clothing' && <Shirt size={14} aria-hidden="true" />}
+                {cultureTheme.moduleId !== 'clothing' && <Layers size={14} aria-hidden="true" />}
+                {cultureTheme.moduleId === 'clothing' ? '服装' : '美食'}
+              </button>
+            );
+          })}
+        </div>
         <div className="topbar-meta">
-          <span>{viewLevel === 'country' ? '全国' : viewLevel === 'area' ? currentArea.name : selectedProvinceName}</span>
+          <span>{viewLevel === 'country' ? '全国' : viewLevel === 'area' ? currentArea?.name || '待配置' : selectedProvinceName}</span>
           <b>{theme.labels?.topbarMeta || cultureModule.label}</b>
         </div>
         <button
           className="ghost-button"
           onClick={() => {
+            const resetTarget = getThemeById(activeThemeId || theme.id);
             resetTheme();
-            backCountry();
-            setNotice('已重置地图状态和本地主题配置。');
+            resetViewForTheme(resetTarget, `已重置 ${resetTarget.name}。`);
           }}
           type="button"
         >
@@ -795,13 +1066,13 @@ function App() {
                 {viewLevel === 'country'
                   ? theme.labels?.countryTitle || theme.name
                   : viewLevel === 'area'
-                    ? currentArea.name
+                    ? currentArea?.name || '待配置文化区'
                     : activeMapAsset?.title || selectedProvinceName}
               </h1>
             </div>
             <div className="view-tabs" aria-label="视图层级">
               <button className={viewLevel === 'country' ? 'is-active' : ''} onClick={backCountry} type="button">全国</button>
-              <button className={viewLevel === 'area' ? 'is-active' : ''} onClick={backArea} type="button">大区</button>
+              <button className={viewLevel === 'area' ? 'is-active' : ''} disabled={!currentArea} onClick={backArea} type="button">大区</button>
               <button className={viewLevel === 'province' ? 'is-active' : ''} disabled={!selectedProvinceAdcode} type="button">省份</button>
             </div>
           </div>
@@ -812,6 +1083,7 @@ function App() {
             currentArea={currentArea}
             hoveredAdcode={hoveredAdcode}
             hoveredAreaId={hoveredAreaId}
+            key={theme.id}
             onHoverProvince={setHoveredAdcode}
             onSelectArea={selectArea}
             onSelectFood={selectFood}

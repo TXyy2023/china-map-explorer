@@ -61,7 +61,7 @@ button {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
   align-items: center;
   gap: 16px;
   min-width: 0;
@@ -73,6 +73,7 @@ button {
 
 .brand,
 .ghost-button,
+.culture-tabs button,
 .view-tabs button,
 .action-grid button,
 .asset-buttons button {
@@ -113,6 +114,34 @@ button {
   letter-spacing: 0;
 }
 
+.culture-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(68px, 1fr));
+  gap: 3px;
+  min-width: 146px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.culture-tabs button {
+  min-height: 30px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.culture-tabs button.is-active {
+  background: var(--gold);
+  color: #13100a;
+}
+
+.culture-tabs svg {
+  flex: 0 0 auto;
+}
+
 .topbar-meta {
   display: grid;
   gap: 2px;
@@ -144,6 +173,7 @@ button {
 .ghost-button:hover,
 .action-grid button:hover,
 .asset-buttons button:hover,
+.culture-tabs button:hover,
 .view-tabs button:hover {
   transform: translateY(-1px);
   border-color: var(--line-strong);
@@ -250,6 +280,23 @@ button {
 .province-layer {
   transform-box: fill-box;
   transform-origin: center;
+}
+
+.province-layer {
+  animation: mapFocusIn 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes mapFocusIn {
+  from {
+    opacity: 0.6;
+    transform: scale(0.965);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
 }
 
 .map-ai-fill {
@@ -403,10 +450,47 @@ button {
   pointer-events: none;
 }
 
+.culture-pin-curves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.culture-origin-curve {
+  fill: none;
+  stroke: color-mix(in srgb, var(--food-accent) 72%, rgba(255, 255, 255, 0.52));
+  stroke-dasharray: 8 9;
+  stroke-linecap: round;
+  stroke-width: 1.35;
+  opacity: 0.72;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--food-accent) 48%, transparent));
+  animation: cultureCurveIn 440ms ease both;
+}
+
+.culture-origin-dot {
+  fill: var(--food-accent);
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 1.4;
+  opacity: 0;
+  animation: cultureDotIn 320ms ease 120ms both;
+}
+
+.culture-map-pins.is-leaving .culture-origin-curve,
+.culture-map-pins.is-leaving .culture-origin-dot {
+  animation: cultureCurveOut 300ms ease both;
+}
+
+.culture-pin-curves .is-dimmed {
+  opacity: 0.28;
+  filter: grayscale(0.75);
+}
+
 .culture-pin {
   position: absolute;
-  left: clamp(46px, var(--pin-x), calc(100% - 46px));
-  top: clamp(54px, var(--pin-y), calc(100% - 54px));
+  left: clamp(48px, var(--pin-x), calc(100% - 48px));
+  top: clamp(56px, var(--pin-y), calc(100% - 56px));
   display: grid;
   grid-template-rows: 58px 18px;
   gap: 6px;
@@ -421,9 +505,11 @@ button {
   pointer-events: auto;
   transform: translate(-50%, -50%);
   backdrop-filter: blur(14px);
-  animation: foodPinIn 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: culturePinEnter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition:
     transform 180ms ease,
+    opacity 180ms ease,
+    filter 180ms ease,
     border-color 180ms ease,
     box-shadow 180ms ease,
     background-color 180ms ease;
@@ -437,6 +523,25 @@ button {
   box-shadow:
     0 12px 22px rgba(0, 0, 0, 0.28),
     0 0 0 3px color-mix(in srgb, var(--food-accent) 24%, transparent);
+}
+
+.culture-pin.is-dimmed {
+  opacity: 0.38;
+  filter: grayscale(0.92) saturate(0.42);
+}
+
+.culture-pin.is-province-focus {
+  z-index: 2;
+  border-color: var(--gold);
+  box-shadow:
+    0 16px 26px rgba(0, 0, 0, 0.3),
+    0 0 0 4px rgba(244, 201, 93, 0.2);
+  transform: translate(-50%, -56%) scale(1.08);
+}
+
+.culture-map-pins.is-leaving .culture-pin {
+  animation: culturePinLeave 300ms ease both;
+  pointer-events: none;
 }
 
 .culture-pin-image {
@@ -472,82 +577,58 @@ button {
   white-space: nowrap;
 }
 
-.food-popout {
-  position: absolute;
-  z-index: 6;
-  left: clamp(146px, var(--spotlight-x), calc(100% - 146px));
-  top: clamp(86px, var(--spotlight-y), calc(100% - 86px));
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  width: min(292px, calc(100% - 24px));
-  min-height: 108px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--food-accent) 55%, rgba(255, 255, 255, 0.18));
-  border-radius: 8px;
-  background: rgba(11, 14, 19, 0.9);
-  box-shadow:
-    0 20px 34px rgba(0, 0, 0, 0.36),
-    0 0 0 3px color-mix(in srgb, var(--food-accent) 14%, transparent);
-  transform: translate(-50%, -50%);
-  backdrop-filter: blur(18px);
-  pointer-events: none;
-  animation: foodPopoutIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.food-popout img {
-  width: 78px;
-  height: 78px;
-  border-radius: 8px;
-  object-fit: cover;
-  clip-path: polygon(12% 18%, 36% 5%, 70% 8%, 91% 30%, 88% 68%, 62% 92%, 28% 88%, 7% 58%);
-}
-
-.food-popout div {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.food-popout span,
-.food-popout small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.food-popout strong {
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 1.04rem;
-  font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@keyframes foodPinIn {
+@keyframes cultureCurveIn {
   from {
     opacity: 0;
-    transform: translate(-50%, calc(-50% + 12px)) scale(0.92);
+    stroke-dashoffset: 34;
+  }
+  to {
+    opacity: 0.72;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes cultureCurveOut {
+  to {
+    opacity: 0;
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes cultureDotIn {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes culturePinEnter {
+  from {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--travel-x, 0px)), calc(-50% + var(--travel-y, 0px))) scale(0.22);
+    filter: blur(3px) saturate(0.7);
   }
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+    filter: blur(0) saturate(1);
   }
 }
 
-@keyframes foodPopoutIn {
+@keyframes culturePinLeave {
   from {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% + 10px)) scale(0.96);
-  }
-  to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+    filter: blur(0) saturate(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--travel-x, 0px)), calc(-50% + var(--travel-y, 0px))) scale(0.22);
+    filter: blur(4px) saturate(0.65);
   }
 }
 
@@ -624,10 +705,60 @@ button {
   font-weight: 900;
 }
 
+.empty-culture-state {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed rgba(244, 201, 93, 0.28);
+  border-radius: 8px;
+  background: rgba(244, 201, 93, 0.055);
+}
+
+.empty-culture-state strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 950;
+  line-height: 1.42;
+}
+
+.empty-culture-state span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
 .selected-culture-item {
   display: grid;
   gap: 12px;
   margin-top: 14px;
+}
+
+.selected-item-hero {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.selected-item-hero img {
+  display: block;
+  width: 100%;
+  height: min(220px, 28vh);
+  min-height: 150px;
+  border: 1px solid rgba(244, 201, 93, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  object-fit: cover;
+}
+
+.selected-item-hero figcaption {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selected-item-head {
@@ -1047,8 +1178,15 @@ button {
 
   .topbar-meta {
     grid-column: 1 / -1;
-    grid-row: 2;
+    grid-row: 3;
     text-align: left;
+  }
+
+  .culture-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+    width: min(240px, 100%);
   }
 
   .workspace {
@@ -1102,16 +1240,6 @@ button {
   .culture-pin img {
     width: 44px;
     height: 44px;
-  }
-
-  .food-popout {
-    grid-template-columns: 64px minmax(0, 1fr);
-    width: min(260px, calc(100% - 20px));
-  }
-
-  .food-popout img {
-    width: 64px;
-    height: 64px;
   }
 
   .asset-preview {

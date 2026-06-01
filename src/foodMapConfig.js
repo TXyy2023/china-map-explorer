@@ -818,6 +818,36 @@ export const DEFAULT_FOOD_THEME = {
   ],
 };
 
+export const DEFAULT_CLOTHING_THEME = {
+  cultureType: 'clothing',
+  moduleId: 'clothing',
+  chinaAsset: {
+    id: 'china-clothing-summary',
+    src: '',
+  },
+  description: '用于测试服装文化配置隔离的空白地图，后续可按地域补充服饰、纹样、工艺和题库。',
+  features: {
+    aiRegionFill: false,
+    itemPins: true,
+    itemSpotlight: true,
+  },
+  id: 'chinese-clothing-map-blank',
+  labels: {
+    countryTitle: '可交互中国服装文化地图',
+    emptyState: '暂无服装区块，等待配置地域、服饰小图、纹样工艺与题目。',
+    mapSubtitle: '地图轮廓 / 服装小图点位待配置',
+    sidebarTitle: '华夏服装文化地图',
+    topbarMeta: 'Interactive Clothing Map',
+  },
+  name: '华夏服装文化地图',
+  areas: [],
+};
+
+export const CULTURE_THEMES = [
+  DEFAULT_FOOD_THEME,
+  DEFAULT_CLOTHING_THEME,
+];
+
 // 开发流程中 MCP 配置步骤
 export const FLOW_STEPS = [
   { id: 'select', label: '① 选区' },
@@ -833,11 +863,19 @@ export function cloneTheme(theme = DEFAULT_FOOD_THEME) {
   return JSON.parse(JSON.stringify(theme));
 }
 
+export function getThemeById(themeId) {
+  return CULTURE_THEMES.find((theme) => theme.id === themeId) || DEFAULT_FOOD_THEME;
+}
+
+export function getDefaultAreaId(theme = DEFAULT_FOOD_THEME) {
+  return theme.areas?.[0]?.id || '';
+}
+
 /**
  * 根据 ID 获取指定美食区域
  */
 export function getAreaById(theme, areaId) {
-  return theme.areas.find((area) => area.id === areaId) || theme.areas[0];
+  return theme?.areas?.find((area) => area.id === areaId) || theme?.areas?.[0] || null;
 }
 
 /**
@@ -845,8 +883,8 @@ export function getAreaById(theme, areaId) {
  */
 export function buildProvinceAreaMap(theme) {
   const lookup = new Map();
-  theme.areas.forEach((area) => {
-    area.provinceAdcodes.forEach((adcode) => lookup.set(String(adcode), area));
+  (theme?.areas || []).forEach((area) => {
+    (area.provinceAdcodes || []).forEach((adcode) => lookup.set(String(adcode), area));
   });
   return lookup;
 }
