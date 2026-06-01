@@ -287,18 +287,6 @@ function fallbackAreaBounds(stageSize) {
   };
 }
 
-function buildLayerPathGenerator(focusFeatures, stageSize) {
-  if (!focusFeatures.length) {
-    return geoPath().projection(geoIdentity().reflectY(true).translate([stageSize.width / 2, stageSize.height / 2]));
-  }
-
-  const projection = geoIdentity().reflectY(true).fitExtent(
-    [[MAP_PADDING, MAP_PADDING], [stageSize.width - MAP_PADDING, stageSize.height - MAP_PADDING]],
-    buildFeatureCollection(focusFeatures),
-  );
-  return geoPath().projection(projection);
-}
-
 function pinScaleForCount(itemCount, stageSize, scopeMode) {
   if (!itemCount) return 1;
 
@@ -442,8 +430,9 @@ function buildCultureItemLayouts({
   activeAreas,
   cultureModule,
   features,
+  highlightProvinceAdcode,
   nonce,
-  selectedProvinceAdcode,
+  pathGenerator,
   scopeMode,
   stageSize,
 }) {
@@ -452,29 +441,24 @@ function buildCultureItemLayouts({
   ));
   if (!scopedItems.length || !stageSize.width || !stageSize.height) return [];
 
-  const scopeAdcodes = new Set(
-    scopeMode === 'country'
-      ? features.map((feature) => String(feature.properties.adcode))
-      : activeAreas.flatMap((area) => area.provinceAdcodes || []).map(String),
-  );
-  const focusFeatures = scopeAdcodes.size
+  const scopeAdcodes = new Set(activeAreas.flatMap((area) => area.provinceAdcodes || []).map(String));
+  const scopeFeatures = scopeAdcodes.size
     ? features.filter((feature) => scopeAdcodes.has(String(feature.properties.adcode)))
     : features;
-  const layerPathGenerator = buildLayerPathGenerator(focusFeatures.length ? focusFeatures : features, stageSize);
-  const activeAreaBounds = boundsFromFeatures(focusFeatures.length ? focusFeatures : features, layerPathGenerator)
+  const activeAreaBounds = boundsFromFeatures(scopeFeatures.length ? scopeFeatures : features, pathGenerator)
     || fallbackAreaBounds(stageSize);
   const areaCenter = activeAreaBounds
     ? { x: activeAreaBounds.x + activeAreaBounds.w / 2, y: activeAreaBounds.y + activeAreaBounds.h / 2 }
     : { x: stageSize.width / 2, y: stageSize.height / 2 };
   const itemCount = scopedItems.length;
   const pinScale = pinScaleForCount(itemCount, stageSize, scopeMode);
-  const selectedProvince = selectedProvinceAdcode ? String(selectedProvinceAdcode) : '';
+  const highlightedProvince = highlightProvinceAdcode ? String(highlightProvinceAdcode) : '';
 
   const baseLayouts = scopedItems.map(({ area, item }, index) => {
     const layoutSeed = `${scopeMode}:${area.id}:${item.id}:${index}:${nonce}:${stageSize.width}:${stageSize.height}`;
     const random = seededRandom(hashString(layoutSeed));
     const provinceFeature = features.find((feature) => String(feature.properties.adcode) === String(item.provinceAdcode));
-    const origin = pointFromFeature(provinceFeature, layerPathGenerator, areaCenter);
+    const origin = pointFromFeature(provinceFeature, pathGenerator, areaCenter);
     const anchor = scopeMode === 'country'
       ? targetPointForCountryItem({ index, itemCount, origin, pinScale, random, stageSize })
       : targetPointForItem({ areaBounds: activeAreaBounds, index, itemCount, origin, pinScale, random, stageSize });
@@ -500,8 +484,8 @@ function buildCultureItemLayouts({
       areaId: layout.area.id,
       areaName: layout.area.name,
       curvePath: buildCurvePath(origin, target, layout.curveRandom),
-      dimmed: Boolean(selectedProvince && itemProvince && itemProvince !== selectedProvince),
-      focused: Boolean(selectedProvince && itemProvince && itemProvince === selectedProvince),
+      dimmed: Boolean(highlightedProvince && itemProvince && itemProvince !== highlightedProvince),
+      focused: Boolean(highlightedProvince && itemProvince && itemProvince === highlightedProvince),
       leave,
       origin,
       pinScale: layout.pinScale,
@@ -519,14 +503,28 @@ function CultureMapPins({
   cultureModule,
   itemLayouts,
   layerPhase,
+  onLayerMouseEnter,
+  onLayerMouseLeave,
   onSelectFood,
   selectedFood,
+  stageSize,
 }) {
   if (!itemLayouts.length) return null;
 
   return (
-    <div className={`culture-map-pins ${layerPhase === 'leaving' ? 'is-leaving' : 'is-active'}`} aria-label={cultureModule.itemNoun}>
-      <svg className="culture-pin-curves" aria-hidden="true">
+    <div
+      className={`culture-map-pins ${layerPhase === 'leaving' ? 'is-leaving' : 'is-active'}`}
+      aria-label={cultureModule.itemNoun}
+      onMouseEnter={onLayerMouseEnter}
+      onMouseLeave={onLayerMouseLeave}
+    >
+      <svg
+        className="culture-pin-curves"
+        aria-hidden="true"
+        height={stageSize.height}
+        viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
+        width={stageSize.width}
+      >
         {itemLayouts.map((item) => (
           <g className={item.dimmed ? 'is-dimmed' : ''} key={`curve-${item.id}`}>
             <path
@@ -705,7 +703,7 @@ function InteractiveMap({
     const areas = viewLevel === 'country'
       ? hoveredArea
         ? [hoveredArea]
-        : theme.areas || []
+        : []
       : currentArea
         ? [currentArea]
         : [];
@@ -727,13 +725,14 @@ function InteractiveMap({
         activeAreas: layer.areas,
         cultureModule,
         features,
+        highlightProvinceAdcode: viewLevel === 'country' ? null : hoveredAdcode || selectedProvinceAdcode,
         nonce: layer.nonce,
+        pathGenerator,
         scopeMode: layer.mode,
-        selectedProvinceAdcode,
         stageSize,
       }),
     })).filter((layer) => layer.itemLayouts.length),
-    [cultureModule, features, pinLayers, selectedProvinceAdcode, stageSize],
+    [cultureModule, features, hoveredAdcode, pathGenerator, pinLayers, selectedProvinceAdcode, stageSize, viewLevel],
   );
   const focusKey = `${viewLevel}:${currentArea?.id || 'country'}:${selectedProvinceAdcode || 'all'}`;
 
@@ -958,8 +957,11 @@ function InteractiveMap({
             itemLayouts={layer.itemLayouts}
             key={layer.id}
             layerPhase={layer.phase}
+            onLayerMouseEnter={layer.mode === 'preview' ? () => window.clearTimeout(hoverClearTimerRef.current) : undefined}
+            onLayerMouseLeave={layer.mode === 'preview' ? clearCountryHoverWithAnimation : undefined}
             onSelectFood={onSelectFood}
             selectedFood={selectedFood}
+            stageSize={stageSize}
           />
         ))
       )}
