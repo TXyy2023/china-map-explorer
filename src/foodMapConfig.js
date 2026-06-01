@@ -5,7 +5,7 @@
  */
 
 // 本地持久化缓存地图状态的 localStorage key 键名
-export const STORAGE_KEY = 'agy-culture-map-v6';
+export const STORAGE_KEY = 'agy-culture-map-v7';
 
 // 初始默认的川渝火锅 AI 绘图资源配置
 export const FOOD_IMAGE_ASSET = {
@@ -831,7 +831,7 @@ const ADDITIONAL_FOOD_AREAS = [
       coordinates: [123.5, 44.6],
       id: 'summary-northeast-grain-stew-food',
       size: { height: 160, width: 220 },
-      src: '/assets/food/china-food-ai.png',
+      src: '/assets/food/northeast-grain-stew-food-summary.png',
       title: '东北草原炖菜汇',
       type: 'image',
     },
@@ -856,7 +856,7 @@ const ADDITIONAL_FOOD_AREAS = [
       coordinates: [117.8, 25.8],
       id: 'summary-southeast-mintai-gan-food',
       size: { height: 160, width: 220 },
-      src: '/assets/food/china-food-ai.png',
+      src: '/assets/food/southeast-mintai-gan-food-summary.png',
       title: '闽台赣山海米粉汇',
       type: 'image',
     },
@@ -881,7 +881,7 @@ const ADDITIONAL_FOOD_AREAS = [
       coordinates: [112.4, 29.5],
       id: 'summary-jingchu-huxiang-food',
       size: { height: 160, width: 220 },
-      src: '/assets/food/china-food-ai.png',
+      src: '/assets/food/jingchu-huxiang-food-summary.png',
       title: '荆楚湖湘热辣汇',
       type: 'image',
     },
@@ -906,7 +906,7 @@ const ADDITIONAL_FOOD_AREAS = [
       coordinates: [95.6, 28.6],
       id: 'summary-yunnan-tibet-highland-food',
       size: { height: 160, width: 220 },
-      src: '/assets/food/china-food-ai.png',
+      src: '/assets/food/yunnan-tibet-highland-food-summary.png',
       title: '云藏高原风物汇',
       type: 'image',
     },
@@ -995,15 +995,6 @@ const PROVINCE_COORDINATES = {
   '820000': [113.54, 22.19],
 };
 
-const PROVINCE_FOOD_IMAGE_ADCODE_SET = new Set([
-  '110000', '120000', '130000', '140000',
-  '310000', '320000', '330000', '340000',
-  '370000', '410000', '440000', '450000',
-  '460000', '500000', '510000', '520000',
-  '610000', '620000', '630000', '640000',
-  '650000', '810000', '820000',
-]);
-
 const PROVINCE_FOOD_CATALOG = {
   '110000': ['北京烤鸭', '老北京涮羊肉', '炸酱面', '豆汁焦圈', '卤煮火烧', '爆肚'],
   '120000': ['煎饼馃子', '狗不理包子', '十八街麻花', '锅巴菜', '耳朵眼炸糕', '熟梨糕'],
@@ -1042,11 +1033,81 @@ const PROVINCE_FOOD_CATALOG = {
 };
 
 const MIN_FOODS_PER_PROVINCE = 6;
+const MAX_FOODS_PER_AREA = 12;
 const FOOD_OBJECT_POSITIONS = ['50% 50%', '52% 48%', '48% 52%', '54% 52%', '46% 50%'];
 
 function getProvinceFoodImage(area, adcode) {
-  if (PROVINCE_FOOD_IMAGE_ADCODE_SET.has(String(adcode))) return `/assets/food/${adcode}-food-ai.png`;
-  return area.summaryAsset?.src || '/assets/food/china-food-ai.png';
+  return `/assets/food/${adcode}-food-ai.png`;
+}
+
+function hashFoodSeed(input = '') {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededFoodRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let t = value;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function seededShuffle(items, seed) {
+  const next = [...items];
+  const random = seededFoodRandom(seed);
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function selectEvenlyByProvince(items, provinceAdcodes, maxItems, seed) {
+  if (items.length <= maxItems) return items;
+
+  const order = provinceAdcodes.map(String);
+  const buckets = new Map(order.map((adcode) => [adcode, []]));
+  const fallback = [];
+
+  items.forEach((item) => {
+    const key = String(item.provinceAdcode || '');
+    if (buckets.has(key)) {
+      buckets.get(key).push(item);
+    } else {
+      fallback.push(item);
+    }
+  });
+
+  order.forEach((adcode, index) => {
+    buckets.set(adcode, seededShuffle(buckets.get(adcode), seed + index + 1));
+  });
+
+  const selected = [];
+  let cursor = 0;
+  while (selected.length < maxItems) {
+    const before = selected.length;
+    order.forEach((adcode) => {
+      if (selected.length >= maxItems) return;
+      const bucket = buckets.get(adcode);
+      if (bucket?.[cursor]) selected.push(bucket[cursor]);
+    });
+    cursor += 1;
+    if (before === selected.length) break;
+  }
+
+  if (selected.length < maxItems && fallback.length) {
+    selected.push(...seededShuffle(fallback, seed + 997).slice(0, maxItems - selected.length));
+  }
+
+  return selected;
 }
 
 function slugifyFoodId(name) {
@@ -1119,7 +1180,12 @@ function expandAreaFoodItems(area) {
     });
   });
 
-  area.foodItems = nextItems;
+  area.foodItems = selectEvenlyByProvince(
+    nextItems,
+    area.provinceAdcodes || [],
+    MAX_FOODS_PER_AREA,
+    hashFoodSeed(`${area.id}:food-area-cap`),
+  );
   ensureAreaProvinceAssets(area);
 }
 

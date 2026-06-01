@@ -17,23 +17,34 @@ const provinceNames = {
   '120000': '天津',
   '130000': '河北',
   '140000': '山西',
+  '150000': '内蒙古',
+  '210000': '辽宁',
+  '220000': '吉林',
+  '230000': '黑龙江',
   '310000': '上海',
   '320000': '江苏',
   '330000': '浙江',
   '340000': '安徽',
+  '350000': '福建',
+  '360000': '江西',
   '370000': '山东',
   '410000': '河南',
+  '420000': '湖北',
+  '430000': '湖南',
   '440000': '广东',
   '450000': '广西',
   '460000': '海南',
   '500000': '重庆',
   '510000': '四川',
   '520000': '贵州',
+  '530000': '云南',
+  '540000': '西藏',
   '610000': '陕西',
   '620000': '甘肃',
   '630000': '青海',
   '640000': '宁夏',
   '650000': '新疆',
+  '710000': '台湾',
   '810000': '香港',
   '820000': '澳门',
 };
@@ -187,6 +198,16 @@ function sanitizeAssetPatch(patch = {}) {
   return next;
 }
 
+function patchAssetForGeneration(asset, patch = {}) {
+  const normalizedPatch = typeof patch === 'string' ? { prompt: patch } : sanitizeAssetPatch(patch);
+  if (!Object.keys(normalizedPatch).length) return asset;
+  return {
+    ...asset,
+    ...normalizedPatch,
+    promptUpdatedAt: new Date().toISOString(),
+  };
+}
+
 function getImageApiBaseUrl() {
   return (process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/+$/, '');
 }
@@ -245,6 +266,38 @@ async function clipAssetOutput(asset) {
   ], { cwd: projectRoot });
 }
 
+async function generateAndClipAsset(asset) {
+  const sourcePath = publicToFilePath(asset.sourceImage);
+  const generatedBytes = await callImageEditApi(asset);
+  await mkdir(dirname(sourcePath), { recursive: true });
+  await writeFile(sourcePath, generatedBytes);
+
+  await clipAssetOutput(asset);
+
+  return {
+    ...asset,
+    clippedAt: new Date().toISOString(),
+    generatedAt: new Date().toISOString(),
+    lastSourceBytes: generatedBytes.length,
+  };
+}
+
+async function mapWithConcurrency(items, concurrency, iterator) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await iterator(items[index], index);
+    }
+  }));
+
+  return results;
+}
+
 export async function clipImageAsset(assetId, patch = {}) {
   let asset = await updateImageAsset(assetId, sanitizeAssetPatch(patch));
   await clipAssetOutput(asset);
@@ -259,24 +312,88 @@ export async function clipImageAsset(assetId, patch = {}) {
 }
 
 export async function regenerateImageAsset(assetId, patch = {}) {
-  const normalizedPatch = typeof patch === 'string' ? { prompt: patch } : sanitizeAssetPatch(patch);
-  let asset = await updateImageAsset(assetId, normalizedPatch);
-  const sourcePath = publicToFilePath(asset.sourceImage);
+  const assets = await readImageAssets();
+  const index = assets.findIndex((asset) => asset.id === assetId);
+  if (index === -1) {
+    throw new Error(`Unknown image asset: ${assetId}`);
+  }
 
-  const generatedBytes = await callImageEditApi(asset);
-  await mkdir(dirname(sourcePath), { recursive: true });
-  await writeFile(sourcePath, generatedBytes);
-
-  await clipAssetOutput(asset);
-
-  asset = await updateImageAsset(assetId, {
-    clippedAt: new Date().toISOString(),
-    generatedAt: new Date().toISOString(),
-    lastSourceBytes: generatedBytes.length,
-  });
+  const asset = await generateAndClipAsset(patchAssetForGeneration(assets[index], patch));
+  assets[index] = asset;
+  await writeAssetData(assets);
 
   return {
     asset,
     cacheBust: Date.now(),
+  };
+}
+
+export async function regenerateImageAssets(options = {}) {
+  const assets = await readImageAssets();
+  const assetIds = Array.isArray(options.assetIds) && options.assetIds.length
+    ? new Set(options.assetIds.map(String))
+    : null;
+  const kinds = Array.isArray(options.kinds) && options.kinds.length
+    ? new Set(options.kinds.map(String))
+    : null;
+  const limit = Number(options.limit);
+  const concurrency = Math.max(1, Math.min(Number(options.concurrency) || 3, 6));
+  const patchById = options.patchById && typeof options.patchById === 'object' ? options.patchById : {};
+  const sharedPatch = options.patch && typeof options.patch === 'object' ? options.patch : {};
+
+  let selected = assets
+    .map((asset, index) => ({ asset, index }))
+    .filter(({ asset }) => (!assetIds || assetIds.has(asset.id)) && (!kinds || kinds.has(asset.kind)));
+
+  if (Number.isFinite(limit) && limit > 0) {
+    selected = selected.slice(0, limit);
+  }
+
+  const skipped = [];
+  const jobs = [];
+  for (const item of selected) {
+    const outputExists = await pathExists(publicToFilePath(item.asset.outputImage));
+    if (options.onlyMissing === true && outputExists) {
+      skipped.push({
+        id: item.asset.id,
+        outputImage: item.asset.outputImage,
+        reason: 'output-exists',
+      });
+    } else {
+      jobs.push(item);
+    }
+  }
+
+  const results = await mapWithConcurrency(jobs, concurrency, async ({ asset, index }) => {
+    try {
+      const patch = patchById[asset.id] || sharedPatch;
+      const nextAsset = await generateAndClipAsset(patchAssetForGeneration(asset, patch));
+      assets[index] = nextAsset;
+      return {
+        asset: nextAsset,
+        id: asset.id,
+        ok: true,
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        id: asset.id,
+        ok: false,
+      };
+    }
+  });
+
+  if (results.some((result) => result.ok)) {
+    await writeAssetData(assets);
+  }
+
+  return {
+    cacheBust: Date.now(),
+    concurrency,
+    failed: results.filter((result) => !result.ok).length,
+    generated: results.filter((result) => result.ok).length,
+    requested: selected.length,
+    results,
+    skipped,
   };
 }

@@ -31,6 +31,7 @@ const GEO_URL = '/geo/china.json';
 const MAP_PADDING = 28;
 const FALLBACK_STAGE_SIZE = { width: 980, height: 680 };
 const DEFAULT_AREA_ID = 'sichuan-chongqing-food';
+const AREA_PIN_MAX_ITEMS = 12;
 const PIN_SAFE_X = 66;
 const PIN_SAFE_TOP = 66;
 const PIN_SAFE_BOTTOM = 86;
@@ -143,6 +144,61 @@ function seededRandom(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function seededShuffle(items, seedInput) {
+  const next = [...items];
+  const random = seededRandom(hashString(String(seedInput)));
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function selectEvenlyByProvince(items, provinceAdcodes = [], maxItems = AREA_PIN_MAX_ITEMS, seedInput = '') {
+  if (items.length <= maxItems) return items;
+
+  const order = provinceAdcodes.map(String);
+  const buckets = new Map(order.map((adcode) => [adcode, []]));
+  const fallback = [];
+
+  items.forEach((item) => {
+    const key = String(item.provinceAdcode || '');
+    if (buckets.has(key)) {
+      buckets.get(key).push(item);
+    } else {
+      fallback.push(item);
+    }
+  });
+
+  order.forEach((adcode, index) => {
+    buckets.set(adcode, seededShuffle(buckets.get(adcode), `${seedInput}:${adcode}:${index}`));
+  });
+
+  const selected = [];
+  let cursor = 0;
+  while (selected.length < maxItems) {
+    const before = selected.length;
+    order.forEach((adcode) => {
+      if (selected.length >= maxItems) return;
+      const bucket = buckets.get(adcode);
+      if (bucket?.[cursor]) selected.push(bucket[cursor]);
+    });
+    cursor += 1;
+    if (before === selected.length) break;
+  }
+
+  if (selected.length < maxItems && fallback.length) {
+    selected.push(...seededShuffle(fallback, `${seedInput}:fallback`).slice(0, maxItems - selected.length));
+  }
+
+  return selected;
+}
+
+function sampleAreaItems(area, cultureModule, maxItems, seedInput) {
+  const items = normalizeCultureItems(area, cultureModule);
+  return selectEvenlyByProvince(items, area?.provinceAdcodes || [], maxItems, seedInput);
 }
 
 function useElementSize(fallback = FALLBACK_STAGE_SIZE) {
@@ -437,7 +493,12 @@ function buildCultureItemLayouts({
   stageSize,
 }) {
   const scopedItems = (activeAreas || []).flatMap((area) => (
-    normalizeCultureItems(area, cultureModule).map((item) => ({ area, item }))
+    sampleAreaItems(
+      area,
+      cultureModule,
+      AREA_PIN_MAX_ITEMS,
+      `${scopeMode}:${area.id}:${nonce}:pin-sample`,
+    ).map((item) => ({ area, item }))
   ));
   if (!scopedItems.length || !stageSize.width || !stageSize.height) return [];
 

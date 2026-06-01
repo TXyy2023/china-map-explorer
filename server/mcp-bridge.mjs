@@ -6,7 +6,13 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { clipImageAsset, readImageAssets, regenerateImageAsset, updateImageAsset } from './image-assets.mjs';
+import {
+  clipImageAsset,
+  readImageAssets,
+  regenerateImageAsset,
+  regenerateImageAssets,
+  updateImageAsset,
+} from './image-assets.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataPath = resolve(__dirname, 'data/food-map-config.json');
@@ -247,6 +253,27 @@ app.patch('/api/assets/:assetId', async (c) => {
     if (typeof body.size === 'string') patch.size = body.size;
     const asset = await updateImageAsset(assetId, patch);
     return c.json({ asset, ok: true });
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+    }, 400);
+  }
+});
+
+app.post('/api/assets/batch-regenerate', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const result = await regenerateImageAssets({
+      assetIds: Array.isArray(body.assetIds) ? body.assetIds : undefined,
+      concurrency: body.concurrency,
+      kinds: Array.isArray(body.kinds) ? body.kinds : undefined,
+      limit: body.limit,
+      onlyMissing: body.onlyMissing === true,
+      patch: body.patch,
+      patchById: body.patchById,
+    });
+    return c.json({ ...result, ok: true });
   } catch (error) {
     return c.json({
       error: error instanceof Error ? error.message : String(error),
