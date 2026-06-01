@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { forceCollide, forceSimulation, forceX, forceY } from 'd3-force';
 import { geoIdentity, geoPath } from 'd3-geo';
 import {
   ArrowLeft,
@@ -30,6 +31,12 @@ const GEO_URL = '/geo/china.json';
 const MAP_PADDING = 28;
 const FALLBACK_STAGE_SIZE = { width: 980, height: 680 };
 const DEFAULT_AREA_ID = 'sichuan-chongqing-food';
+const PIN_SAFE_X = 66;
+const PIN_SAFE_TOP = 66;
+const PIN_SAFE_BOTTOM = 86;
+const PIN_COLLISION_RADIUS = 64;
+const PIN_LAYOUT_TICKS = 220;
+const PIN_LEAVE_MS = 680;
 
 async function loadChinaGeography() {
   const response = await fetch(GEO_URL);
@@ -95,6 +102,27 @@ function buildImageFrame(targetBounds, bitmapBounds) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getPinBounds(stageSize, pinScale = 1) {
+  const safeX = Math.max(24, PIN_SAFE_X * pinScale * 0.78);
+  const safeTop = Math.max(26, PIN_SAFE_TOP * pinScale * 0.82);
+  const safeBottom = Math.max(30, PIN_SAFE_BOTTOM * pinScale * 0.82);
+
+  return {
+    maxX: Math.max(safeX, stageSize.width - safeX),
+    maxY: Math.max(safeTop, stageSize.height - safeBottom),
+    minX: safeX,
+    minY: safeTop,
+  };
+}
+
+function clampPinPoint(point, stageSize, pinScale = 1) {
+  const bounds = getPinBounds(stageSize, pinScale);
+  return {
+    x: clamp(point.x, bounds.minX, bounds.maxX),
+    y: clamp(point.y, bounds.minY, bounds.maxY),
+  };
 }
 
 function hashString(input = '') {
@@ -250,76 +278,233 @@ function buildCurvePath(origin, target, random) {
   return `M ${origin.x.toFixed(1)} ${origin.y.toFixed(1)} Q ${control.x.toFixed(1)} ${control.y.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`;
 }
 
-function targetPointForItem({ areaBounds, index, itemCount, origin, random, stageSize }) {
-  const safeX = 66;
-  const safeTop = 66;
-  const safeBottom = 82;
-  const area = areaBounds || {
+function fallbackAreaBounds(stageSize) {
+  return {
     x: stageSize.width * 0.22,
     y: stageSize.height * 0.18,
     w: stageSize.width * 0.56,
     h: stageSize.height * 0.58,
   };
-  const rowOffset = itemCount > 1 ? (index - (itemCount - 1) / 2) * 72 : 0;
-  const slots = [
-    { x: area.x + area.w + 98, y: area.y + area.h * 0.22 + rowOffset },
-    { x: area.x + area.w + 112, y: area.y + area.h * 0.68 + rowOffset },
-    { x: area.x - 94, y: area.y + area.h * 0.3 + rowOffset },
-    { x: area.x - 104, y: area.y + area.h * 0.76 + rowOffset },
-    { x: area.x + area.w * 0.24 + rowOffset, y: area.y - 68 },
-    { x: area.x + area.w * 0.76 + rowOffset, y: area.y + area.h + 76 },
-  ];
-  const slot = slots[(index + Math.floor(random() * slots.length)) % slots.length];
-  let target = {
-    x: slot.x + (random() - 0.5) * 82,
-    y: slot.y + (random() - 0.5) * 72,
-  };
+}
 
-  target.x = clamp(target.x, safeX, stageSize.width - safeX);
-  target.y = clamp(target.y, safeTop, stageSize.height - safeBottom);
-
-  if (Math.hypot(target.x - origin.x, target.y - origin.y) < 86) {
-    target = {
-      x: clamp(stageSize.width - origin.x + (random() - 0.5) * 120, safeX, stageSize.width - safeX),
-      y: clamp(origin.y + (random() - 0.5) * 180, safeTop, stageSize.height - safeBottom),
-    };
+function buildLayerPathGenerator(focusFeatures, stageSize) {
+  if (!focusFeatures.length) {
+    return geoPath().projection(geoIdentity().reflectY(true).translate([stageSize.width / 2, stageSize.height / 2]));
   }
 
-  return target;
+  const projection = geoIdentity().reflectY(true).fitExtent(
+    [[MAP_PADDING, MAP_PADDING], [stageSize.width - MAP_PADDING, stageSize.height - MAP_PADDING]],
+    buildFeatureCollection(focusFeatures),
+  );
+  return geoPath().projection(projection);
+}
+
+function pinScaleForCount(itemCount, stageSize, scopeMode) {
+  if (!itemCount) return 1;
+
+  const available = stageSize.width * stageSize.height * (scopeMode === 'country' ? 0.44 : 0.42);
+  const footprint = 118 * 118;
+  const naturalScale = Math.sqrt(available / Math.max(itemCount * footprint, 1));
+  if (scopeMode === 'country') {
+    return Number(clamp(naturalScale * 1.14, 0.54, 0.74).toFixed(3));
+  }
+  return Number(clamp(naturalScale, 0.52, 1).toFixed(3));
+}
+
+function buildLeaveVector(target, stageSize, random) {
+  const center = { x: stageSize.width / 2, y: stageSize.height / 2 };
+  let directionX = target.x - center.x;
+  let directionY = target.y - center.y;
+  const length = Math.hypot(directionX, directionY);
+
+  if (length < 1) {
+    const angle = random() * Math.PI * 2;
+    directionX = Math.cos(angle);
+    directionY = Math.sin(angle);
+  } else {
+    directionX /= length;
+    directionY /= length;
+  }
+
+  const distance = Math.max(stageSize.width, stageSize.height) * 0.86 + 180;
+  return {
+    x: directionX * distance,
+    y: directionY * distance,
+  };
+}
+
+function targetPointForItem({ areaBounds, index, itemCount, origin, pinScale, random, stageSize }) {
+  const area = areaBounds || fallbackAreaBounds(stageSize);
+
+  const center = {
+    x: area.x + area.w / 2,
+    y: area.y + area.h / 2,
+  };
+  const halfWidth = Math.max(area.w / 2, 1);
+  const halfHeight = Math.max(area.h / 2, 1);
+  let directionX = clamp((origin.x - center.x) / halfWidth, -1, 1);
+  let directionY = clamp((origin.y - center.y) / halfHeight, -1, 1);
+  const length = Math.hypot(directionX, directionY);
+
+  if (length < 0.16) {
+    const fallbackAngle = (index / Math.max(itemCount, 1)) * Math.PI * 2 + (random() - 0.5) * 0.42;
+    directionX = Math.cos(fallbackAngle);
+    directionY = Math.sin(fallbackAngle);
+  } else {
+    directionX /= length;
+    directionY /= length;
+  }
+
+  const tangentX = -directionY;
+  const tangentY = directionX;
+  const siblingOffset = itemCount > 1 ? index - (itemCount - 1) / 2 : 0;
+  const tangentSpread = clamp(380 / Math.max(itemCount, 1), 46, 76);
+  const radialGap = 92 + random() * 56;
+  const anchor = {
+    x: center.x + directionX * (halfWidth + radialGap),
+    y: center.y + directionY * (halfHeight + radialGap),
+  };
+
+  return clampPinPoint({
+    x: anchor.x + tangentX * siblingOffset * tangentSpread + (random() - 0.5) * 74,
+    y: anchor.y + tangentY * siblingOffset * tangentSpread + (random() - 0.5) * 66,
+  }, stageSize, pinScale);
+}
+
+function targetPointForCountryItem({ index, itemCount, origin, pinScale, random, stageSize }) {
+  const ring = 18 + (index % 4) * 8;
+  const angle = (index / Math.max(itemCount, 1)) * Math.PI * 2 + random() * 0.82;
+  return clampPinPoint({
+    x: origin.x + Math.cos(angle) * ring + (random() - 0.5) * 26,
+    y: origin.y + Math.sin(angle) * ring + (random() - 0.5) * 22,
+  }, stageSize, pinScale);
+}
+
+function clampPinNode(node, bounds) {
+  const nextX = clamp(node.x, bounds.minX, bounds.maxX);
+  const nextY = clamp(node.y, bounds.minY, bounds.maxY);
+  if (nextX !== node.x) node.vx = 0;
+  if (nextY !== node.y) node.vy = 0;
+  node.x = nextX;
+  node.y = nextY;
+}
+
+function resolvePinTargets(baseLayouts, stageSize, pinScale, scopeMode) {
+  if (scopeMode === 'country') {
+    return baseLayouts.map((layout) => ({
+      ...layout,
+      target: layout.anchor,
+    }));
+  }
+
+  if (baseLayouts.length < 2) {
+    return baseLayouts.map((layout) => ({
+      ...layout,
+      target: layout.anchor,
+    }));
+  }
+
+  const bounds = getPinBounds(stageSize, pinScale);
+  const collisionRadius = Math.max(30, PIN_COLLISION_RADIUS * pinScale);
+  const attractStrength = baseLayouts.length > 12 ? 0.08 : 0.22;
+  const nodes = baseLayouts.map((layout) => ({
+    ...layout,
+    targetX: layout.anchor.x,
+    targetY: layout.anchor.y,
+    x: layout.anchor.x,
+    y: layout.anchor.y,
+  }));
+  const simulationSeed = hashString(nodes.map((node) => `${node.item.id}:${node.targetX.toFixed(1)}:${node.targetY.toFixed(1)}`).join('|'));
+  const simulation = forceSimulation(nodes)
+    .randomSource(seededRandom(simulationSeed))
+    .alpha(1)
+    .alphaMin(0.001)
+    .velocityDecay(0.42)
+    .force('x', forceX((node) => node.targetX).strength(attractStrength))
+    .force('y', forceY((node) => node.targetY).strength(attractStrength))
+    .force('collide', forceCollide(collisionRadius).strength(1).iterations(8))
+    .stop();
+
+  for (let tick = 0; tick < PIN_LAYOUT_TICKS; tick += 1) {
+    simulation.tick();
+    nodes.forEach((node) => clampPinNode(node, bounds));
+  }
+
+  simulation.stop();
+
+  return nodes.map((node) => ({
+    ...node,
+    target: clampPinPoint({ x: node.x, y: node.y }, stageSize, pinScale),
+  }));
 }
 
 function buildCultureItemLayouts({
-  activeArea,
-  areaBounds,
+  activeAreas,
   cultureModule,
   features,
   nonce,
-  pathGenerator,
   selectedProvinceAdcode,
+  scopeMode,
   stageSize,
 }) {
-  const items = normalizeCultureItems(activeArea, cultureModule);
-  if (!activeArea || !items.length || !stageSize.width || !stageSize.height) return [];
+  const scopedItems = (activeAreas || []).flatMap((area) => (
+    normalizeCultureItems(area, cultureModule).map((item) => ({ area, item }))
+  ));
+  if (!scopedItems.length || !stageSize.width || !stageSize.height) return [];
 
-  const areaCenter = areaBounds
-    ? { x: areaBounds.x + areaBounds.w / 2, y: areaBounds.y + areaBounds.h / 2 }
+  const scopeAdcodes = new Set(
+    scopeMode === 'country'
+      ? features.map((feature) => String(feature.properties.adcode))
+      : activeAreas.flatMap((area) => area.provinceAdcodes || []).map(String),
+  );
+  const focusFeatures = scopeAdcodes.size
+    ? features.filter((feature) => scopeAdcodes.has(String(feature.properties.adcode)))
+    : features;
+  const layerPathGenerator = buildLayerPathGenerator(focusFeatures.length ? focusFeatures : features, stageSize);
+  const activeAreaBounds = boundsFromFeatures(focusFeatures.length ? focusFeatures : features, layerPathGenerator)
+    || fallbackAreaBounds(stageSize);
+  const areaCenter = activeAreaBounds
+    ? { x: activeAreaBounds.x + activeAreaBounds.w / 2, y: activeAreaBounds.y + activeAreaBounds.h / 2 }
     : { x: stageSize.width / 2, y: stageSize.height / 2 };
-  const itemCount = items.length;
+  const itemCount = scopedItems.length;
+  const pinScale = pinScaleForCount(itemCount, stageSize, scopeMode);
+  const selectedProvince = selectedProvinceAdcode ? String(selectedProvinceAdcode) : '';
 
-  return items.map((item, index) => {
-    const random = seededRandom(hashString(`${activeArea.id}:${item.id}:${index}:${nonce}:${stageSize.width}:${stageSize.height}`));
+  const baseLayouts = scopedItems.map(({ area, item }, index) => {
+    const layoutSeed = `${scopeMode}:${area.id}:${item.id}:${index}:${nonce}:${stageSize.width}:${stageSize.height}`;
+    const random = seededRandom(hashString(layoutSeed));
     const provinceFeature = features.find((feature) => String(feature.properties.adcode) === String(item.provinceAdcode));
-    const origin = pointFromFeature(provinceFeature, pathGenerator, areaCenter);
-    const target = targetPointForItem({ areaBounds, index, itemCount, origin, random, stageSize });
-    const selectedProvince = selectedProvinceAdcode ? String(selectedProvinceAdcode) : '';
+    const origin = pointFromFeature(provinceFeature, layerPathGenerator, areaCenter);
+    const anchor = scopeMode === 'country'
+      ? targetPointForCountryItem({ index, itemCount, origin, pinScale, random, stageSize })
+      : targetPointForItem({ areaBounds: activeAreaBounds, index, itemCount, origin, pinScale, random, stageSize });
+
+    return {
+      anchor,
+      area,
+      curveRandom: seededRandom(hashString(`${layoutSeed}:curve`)),
+      item,
+      origin,
+      pinScale,
+    };
+  });
+
+  return resolvePinTargets(baseLayouts, stageSize, pinScale, scopeMode).map((layout) => {
+    const { item, origin, target } = layout;
     const itemProvince = item.provinceAdcode ? String(item.provinceAdcode) : '';
+    const leaveRandom = seededRandom(hashString(`${scopeMode}:${layout.area.id}:${item.id}:${nonce}:leave`));
+    const leave = buildLeaveVector(target, stageSize, leaveRandom);
 
     return {
       ...item,
-      curvePath: buildCurvePath(origin, target, random),
+      areaId: layout.area.id,
+      areaName: layout.area.name,
+      curvePath: buildCurvePath(origin, target, layout.curveRandom),
       dimmed: Boolean(selectedProvince && itemProvince && itemProvince !== selectedProvince),
       focused: Boolean(selectedProvince && itemProvince && itemProvince === selectedProvince),
+      leave,
       origin,
+      pinScale: layout.pinScale,
       target,
       travel: {
         x: origin.x - target.x,
@@ -361,7 +546,8 @@ function CultureMapPins({
       </svg>
 
       {itemLayouts.map((item) => {
-        const selected = selectedFood?.id === item.id;
+        const selected = selectedFood?.id === item.id && selectedFood?.areaId === item.areaId;
+        const pinScale = item.pinScale || 1;
         return (
           <button
             aria-pressed={selected}
@@ -371,12 +557,20 @@ function CultureMapPins({
               item.dimmed ? 'is-dimmed' : '',
               item.focused ? 'is-province-focus' : '',
             ].join(' ')}
-            key={item.id}
+            key={`${item.areaId}-${item.id}`}
             onClick={() => onSelectFood(item)}
             style={{
               '--food-accent': item.accent,
+              '--leave-x': `${item.leave.x}px`,
+              '--leave-y': `${item.leave.y}px`,
               '--pin-x': `${item.target.x}px`,
               '--pin-y': `${item.target.y}px`,
+              '--pin-scale': pinScale,
+              '--pin-dim-scale': Math.max(0.38, pinScale * 0.82).toFixed(3),
+              '--pin-enter-scale': Math.max(0.16, pinScale * 0.24).toFixed(3),
+              '--pin-focus-scale': Math.min(1.18, pinScale * 1.14).toFixed(3),
+              '--pin-hover-scale': Math.min(1.12, pinScale * 1.05).toFixed(3),
+              '--pin-leave-scale': Math.max(0.12, pinScale * 0.18).toFixed(3),
               '--travel-x': `${item.travel.x}px`,
               '--travel-y': `${item.travel.y}px`,
             }}
@@ -421,8 +615,8 @@ function InteractiveMap({
   const [cursor, setCursor] = useState(null);
   const hoverClearTimerRef = useRef(null);
   const pinClearTimerRef = useRef(null);
-  const pinLayerAreaRef = useRef(null);
-  const [pinLayer, setPinLayer] = useState({ area: null, phase: 'hidden', nonce: 0 });
+  const pinLayerSerialRef = useRef(0);
+  const [pinLayers, setPinLayers] = useState([]);
   const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
 
   const { data: chinaGeoJson, isLoading, error } = useQuery({
@@ -504,21 +698,42 @@ function InteractiveMap({
   const fillSrc = showAiFill && fillAsset?.src ? withVersion(fillAsset.src, assetVersions) : '';
   const bitmapBounds = useBitmapVisibleBounds(fillSrc);
   const imageFrame = buildImageFrame(fillTargetBounds, bitmapBounds);
-  const activeAreaForItems = viewLevel === 'country'
-    ? getAreaById(theme, hoveredAreaId)
-    : currentArea;
-  const pinLayouts = useMemo(
-    () => buildCultureItemLayouts({
-      activeArea: pinLayer.area,
-      areaBounds,
-      cultureModule,
-      features,
-      nonce: pinLayer.nonce,
-      pathGenerator,
-      selectedProvinceAdcode,
-      stageSize,
-    }),
-    [areaBounds, cultureModule, features, pathGenerator, pinLayer.area, pinLayer.nonce, selectedProvinceAdcode, stageSize],
+  const activePinScope = useMemo(() => {
+    const hoveredArea = viewLevel === 'country' && hoveredAreaId
+      ? getAreaById(theme, hoveredAreaId)
+      : null;
+    const areas = viewLevel === 'country'
+      ? hoveredArea
+        ? [hoveredArea]
+        : theme.areas || []
+      : currentArea
+        ? [currentArea]
+        : [];
+    const mode = viewLevel === 'country'
+      ? hoveredArea
+        ? 'preview'
+        : 'country'
+      : 'area';
+    return {
+      areas,
+      key: `${theme.id}:${mode}:${areas.map((area) => area.id).join('|') || 'empty'}`,
+      mode,
+    };
+  }, [currentArea, hoveredAreaId, theme, viewLevel]);
+  const pinLayersWithLayouts = useMemo(
+    () => pinLayers.map((layer) => ({
+      ...layer,
+      itemLayouts: buildCultureItemLayouts({
+        activeAreas: layer.areas,
+        cultureModule,
+        features,
+        nonce: layer.nonce,
+        scopeMode: layer.mode,
+        selectedProvinceAdcode,
+        stageSize,
+      }),
+    })).filter((layer) => layer.itemLayouts.length),
+    [cultureModule, features, pinLayers, selectedProvinceAdcode, stageSize],
   );
   const focusKey = `${viewLevel}:${currentArea?.id || 'country'}:${selectedProvinceAdcode || 'all'}`;
 
@@ -530,37 +745,40 @@ function InteractiveMap({
   useEffect(() => {
     window.clearTimeout(pinClearTimerRef.current);
 
-    if (activeAreaForItems) {
-      setPinLayer((prev) => {
-        const sameArea = prev.area?.id === activeAreaForItems.id;
-        const sameMode = prev.modeKey === `${viewLevel}:${activeAreaForItems.id}`;
-        const next = {
-          area: activeAreaForItems,
-          modeKey: `${viewLevel}:${activeAreaForItems.id}`,
-          nonce: sameArea && sameMode && prev.phase !== 'leaving' ? prev.nonce : prev.nonce + 1,
-          phase: 'active',
-        };
-        pinLayerAreaRef.current = next.area;
-        return next;
+    if (activePinScope.areas.length) {
+      setPinLayers((prev) => {
+        const activeLayer = prev.find((layer) => layer.phase === 'active');
+        if (activeLayer?.scopeKey === activePinScope.key) return prev;
+
+        const nextNonce = pinLayerSerialRef.current + 1;
+        pinLayerSerialRef.current = nextNonce;
+        return [
+          ...prev.map((layer) => ({ ...layer, phase: 'leaving' })),
+          {
+            areas: activePinScope.areas,
+            id: `${activePinScope.key}:${nextNonce}`,
+            mode: activePinScope.mode,
+            nonce: nextNonce,
+            phase: 'active',
+            scopeKey: activePinScope.key,
+          },
+        ];
       });
+      pinClearTimerRef.current = window.setTimeout(() => {
+        setPinLayers((prev) => prev.filter((layer) => layer.phase !== 'leaving'));
+      }, PIN_LEAVE_MS);
       return undefined;
     }
 
-    if (pinLayerAreaRef.current) {
-      setPinLayer((prev) => ({ ...prev, phase: 'leaving' }));
+    setPinLayers((prev) => prev.map((layer) => ({ ...layer, phase: 'leaving' })));
+    if (pinLayers.length) {
       pinClearTimerRef.current = window.setTimeout(() => {
-        pinLayerAreaRef.current = null;
-        setPinLayer((prev) => ({
-          area: null,
-          modeKey: '',
-          nonce: prev.nonce,
-          phase: 'hidden',
-        }));
-      }, 360);
+        setPinLayers([]);
+      }, PIN_LEAVE_MS);
     }
 
     return undefined;
-  }, [activeAreaForItems, viewLevel]);
+  }, [activePinScope, pinLayers.length]);
 
   function handlePointerMove(event, feature, area) {
     window.clearTimeout(hoverClearTimerRef.current);
@@ -592,8 +810,10 @@ function InteractiveMap({
   function selectFeature(feature) {
     const adcode = String(feature.properties.adcode);
     const area = provinceAreaMap.get(adcode);
-    if (viewLevel === 'country' && area) {
-      onSelectArea(area.id);
+    if (viewLevel === 'country') {
+      if (area) onSelectArea(area.id);
+      if (theme.areas?.length) return;
+      onSelectProvince(adcode, formatProvinceName(feature));
       return;
     }
     if (area && area.id !== currentArea?.id) {
@@ -618,7 +838,7 @@ function InteractiveMap({
         <span><MousePointer2 size={14} aria-hidden="true" /> Hover / Click</span>
         <strong>
           {viewLevel === 'country'
-            ? '全国总览'
+            ? getAreaById(theme, hoveredAreaId)?.name || '全国总览'
             : viewLevel === 'area'
               ? currentArea?.name || '待配置区块'
               : formatProvinceName(selectedProvinceFeature)}
@@ -664,11 +884,14 @@ function InteractiveMap({
             const adcode = String(feature.properties.adcode);
             const area = provinceAreaMap.get(adcode);
             const inCurrentArea = currentAreaAdcodes.has(adcode);
+            const inHoveredArea = viewLevel === 'country' && hoveredAreaId && area?.id === hoveredAreaId;
             const hiddenByArea = (viewLevel === 'area' || viewLevel === 'province')
               && currentAreaAdcodes.size > 0
               && !inCurrentArea;
-            const selected = adcode === String(selectedProvinceAdcode);
-            const hovered = adcode === String(hoveredAdcode);
+            const selected = viewLevel !== 'country' && adcode === String(selectedProvinceAdcode);
+            const hovered = viewLevel === 'country'
+              ? Boolean(inHoveredArea)
+              : adcode === String(hoveredAdcode);
             const d = pathGenerator(feature) || '';
 
             return (
@@ -677,6 +900,7 @@ function InteractiveMap({
                 className={[
                   'province-path',
                   hiddenByArea ? 'is-muted' : '',
+                  inHoveredArea ? 'is-area-preview' : '',
                   inCurrentArea && viewLevel !== 'country' ? 'is-in-area' : '',
                   selected ? 'is-selected' : '',
                   hovered ? 'is-hovered' : '',
@@ -717,20 +941,27 @@ function InteractiveMap({
 
       {cursor && (
         <div className="hover-card" style={{ left: cursor.x, top: cursor.y }}>
-          <strong>{formatProvinceName(cursor.feature)}</strong>
-          <span>{cursor.area?.name || `未绑定${cultureModule.label}区块`}</span>
+          <strong>{viewLevel === 'country' && cursor.area ? cursor.area.name : formatProvinceName(cursor.feature)}</strong>
+          <span>
+            {viewLevel === 'country' && cursor.area
+              ? `${cursor.area.provinceAdcodes?.length || 0} 个省份 · 点击进入文化区`
+              : cursor.area?.name || `未绑定${cultureModule.label}区块`}
+          </span>
         </div>
       )}
 
       {showFoodPins && (
-        <CultureMapPins
-          assetVersions={assetVersions}
-          cultureModule={cultureModule}
-          itemLayouts={pinLayouts}
-          layerPhase={pinLayer.phase}
-          onSelectFood={onSelectFood}
-          selectedFood={selectedFood}
-        />
+        pinLayersWithLayouts.map((layer) => (
+          <CultureMapPins
+            assetVersions={assetVersions}
+            cultureModule={cultureModule}
+            itemLayouts={layer.itemLayouts}
+            key={layer.id}
+            layerPhase={layer.phase}
+            onSelectFood={onSelectFood}
+            selectedFood={selectedFood}
+          />
+        ))
       )}
     </section>
   );
@@ -963,15 +1194,23 @@ function App() {
   }
 
   function selectProvince(adcode, provinceName = '') {
+    const nextAdcode = String(adcode);
+    if (String(selectedProvinceAdcode) === nextAdcode) {
+      setSelectedProvinceAdcode(null);
+      setSelectedProvinceLabel('');
+      setNotice(`已取消省份筛选：${provinceName || nextAdcode}。`);
+      return;
+    }
+
     const area = provinceAreaMap.get(String(adcode));
     if (area) {
       setSelectedAreaId(area.id);
       setHoveredAreaId(null);
     }
-    setSelectedProvinceAdcode(String(adcode));
+    setSelectedProvinceAdcode(nextAdcode);
     setSelectedProvinceLabel(provinceName);
-    setViewLevel('province');
-    setNotice(`已选择省份区块：${provinceName || String(adcode)}。`);
+    setViewLevel('area');
+    setNotice(`已高亮省份小图：${provinceName || nextAdcode}。`);
   }
 
   function selectFood(food) {
@@ -979,15 +1218,6 @@ function App() {
     if (food.areaId) {
       setSelectedAreaId(food.areaId);
       setHoveredAreaId(null);
-    }
-    if (food.provinceAdcode) {
-      setSelectedProvinceAdcode(String(food.provinceAdcode));
-      setSelectedProvinceLabel('');
-      setViewLevel('province');
-    } else {
-      setSelectedProvinceAdcode(null);
-      setSelectedProvinceLabel('');
-      setViewLevel('area');
     }
     setNotice(`已选中${cultureModule.itemNoun}：${food.name}。`);
   }

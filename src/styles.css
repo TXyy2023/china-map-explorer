@@ -349,6 +349,13 @@ button {
   stroke-width: 1.25;
 }
 
+.province-path.is-area-preview {
+  fill: color-mix(in srgb, var(--area-color) 22%, rgba(255, 255, 255, 0.08));
+  stroke: var(--gold);
+  stroke-width: 2.1;
+  filter: url(#provinceGlow);
+}
+
 .province-path.is-muted {
   opacity: 0.14;
   pointer-events: none;
@@ -488,25 +495,44 @@ button {
 }
 
 .culture-pin {
+  --pin-scale: 1;
+  --pin-dim-scale: 0.82;
+  --pin-enter-scale: 0.24;
+  --pin-focus-scale: 1.14;
+  --pin-hover-scale: 1.05;
+  --pin-leave-scale: 0.18;
+  --pin-lift: -50%;
+  --pin-active-scale: var(--pin-scale);
   position: absolute;
-  left: clamp(48px, var(--pin-x), calc(100% - 48px));
-  top: clamp(56px, var(--pin-y), calc(100% - 56px));
+  left: clamp(30px, var(--pin-x), calc(100% - 30px));
+  top: clamp(32px, var(--pin-y), calc(100% - 32px));
   display: grid;
   grid-template-rows: 58px 18px;
   gap: 6px;
   width: 82px;
   min-height: 88px;
   padding: 0;
-  border: 1px solid color-mix(in srgb, var(--food-accent) 45%, rgba(255, 255, 255, 0.16));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--food-accent) 48%, rgba(255, 255, 255, 0.18));
   border-radius: 8px;
-  background: rgba(9, 12, 17, 0.78);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 50% 8%, color-mix(in srgb, var(--food-accent) 26%, transparent), transparent 42%),
+    rgba(10, 13, 18, 0.86);
   color: var(--soft);
   cursor: pointer;
   pointer-events: auto;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, var(--pin-lift)) scale(var(--pin-active-scale));
   backdrop-filter: blur(14px);
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -18px 24px rgba(0, 0, 0, 0.18);
   animation: culturePinEnter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
   transition:
+    left 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 360ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 180ms ease,
     opacity 180ms ease,
     filter 180ms ease,
@@ -515,9 +541,35 @@ button {
     background-color 180ms ease;
 }
 
+.culture-pin::before,
+.culture-pin::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.culture-pin::before {
+  inset: 4px;
+  z-index: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.culture-pin::after {
+  top: 5px;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--food-accent) 72%, rgba(255, 255, 255, 0.36));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--food-accent) 54%, transparent);
+  opacity: 0.86;
+}
+
 .culture-pin:hover,
 .culture-pin.is-selected {
-  transform: translate(-50%, -54%);
+  --pin-active-scale: var(--pin-hover-scale);
+  --pin-lift: -54%;
   border-color: var(--food-accent);
   background: rgba(255, 255, 255, 0.11);
   box-shadow:
@@ -526,32 +578,42 @@ button {
 }
 
 .culture-pin.is-dimmed {
-  opacity: 0.38;
+  --pin-active-scale: var(--pin-dim-scale);
+  --pin-lift: -50%;
+  opacity: 0.3;
   filter: grayscale(0.92) saturate(0.42);
 }
 
 .culture-pin.is-province-focus {
+  --pin-active-scale: var(--pin-focus-scale);
+  --pin-lift: -56%;
   z-index: 2;
   border-color: var(--gold);
   box-shadow:
     0 16px 26px rgba(0, 0, 0, 0.3),
     0 0 0 4px rgba(244, 201, 93, 0.2);
-  transform: translate(-50%, -56%) scale(1.08);
 }
 
 .culture-map-pins.is-leaving .culture-pin {
-  animation: culturePinLeave 300ms ease both;
+  animation: culturePinLeave 620ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
 
 .culture-pin-image {
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 56px;
   height: 56px;
   margin: 5px auto 0;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--food-accent) 16%, rgba(255, 255, 255, 0.04));
+  background:
+    radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 38%),
+    color-mix(in srgb, var(--food-accent) 17%, rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 14px rgba(0, 0, 0, 0.22);
 }
 
 .culture-pin img {
@@ -564,6 +626,8 @@ button {
 }
 
 .culture-pin-label {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   overflow: hidden;
@@ -609,12 +673,12 @@ button {
 @keyframes culturePinEnter {
   from {
     opacity: 0;
-    transform: translate(calc(-50% + var(--travel-x, 0px)), calc(-50% + var(--travel-y, 0px))) scale(0.22);
+    transform: translate(calc(-50% + var(--travel-x, 0px)), calc(-50% + var(--travel-y, 0px))) scale(var(--pin-enter-scale));
     filter: blur(3px) saturate(0.7);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, var(--pin-lift)) scale(var(--pin-active-scale));
     filter: blur(0) saturate(1);
   }
 }
@@ -622,12 +686,12 @@ button {
 @keyframes culturePinLeave {
   from {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, var(--pin-lift)) scale(var(--pin-active-scale));
     filter: blur(0) saturate(1);
   }
   to {
     opacity: 0;
-    transform: translate(calc(-50% + var(--travel-x, 0px)), calc(-50% + var(--travel-y, 0px))) scale(0.22);
+    transform: translate(calc(-50% + var(--leave-x, 0px)), calc(-50% + var(--leave-y, 0px))) scale(var(--pin-leave-scale));
     filter: blur(4px) saturate(0.65);
   }
 }
