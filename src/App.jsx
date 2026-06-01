@@ -1200,6 +1200,7 @@ function App() {
     if (String(selectedProvinceAdcode) === nextAdcode) {
       setSelectedProvinceAdcode(null);
       setSelectedProvinceLabel('');
+      setViewLevel('area');
       setNotice(`已取消省份筛选：${provinceName || nextAdcode}。`);
       return;
     }
@@ -1211,8 +1212,8 @@ function App() {
     }
     setSelectedProvinceAdcode(nextAdcode);
     setSelectedProvinceLabel(provinceName);
-    setViewLevel('area');
-    setNotice(`已高亮省份小图：${provinceName || nextAdcode}。`);
+    setViewLevel('province');
+    setNotice(`已进入省份区块：${provinceName || nextAdcode}。`);
   }
 
   function selectFood(food) {
