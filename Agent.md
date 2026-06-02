@@ -134,7 +134,7 @@ npm run dev
 This starts both:
 
 - MCP/API bridge: `node server/mcp-bridge.mjs`
-- Vite frontend: `http://localhost:5174/`
+- Vite frontend: `http://0.0.0.0:3000/`
 
 Build:
 
@@ -234,7 +234,7 @@ For visual or interaction changes, also run:
 npm run dev
 ```
 
-Then open `http://localhost:5174/` and check:
+Then open `http://0.0.0.0:3000/` and check:
 
 - National map renders without blank regions.
 - Region click/drill-down still works.
@@ -248,7 +248,7 @@ For asset regeneration changes, verify that generated files and metadata still a
 ## Common Pitfalls
 
 - Zustand persistence can preserve old theme data in localStorage. If a config change appears missing in the browser, clear the `agy-food-culture-map-v3` localStorage key or use the app reset flow.
-- The frontend dev server uses Vite with `--strictPort` on port `5174`; a port conflict will stop startup instead of selecting another port.
+- The frontend dev server uses Vite with `--strictPort` on host `0.0.0.0` and port `3000`; a port conflict will stop startup instead of selecting another port.
 - Do not assume `server/data/*.json` is the single source of truth. Defaults are rebuilt from `src/foodMapConfig.js` and then merged with saved data.
 - Province adcodes are strings. Keep them quoted to avoid accidental numeric conversion.
 - Public asset paths should be root-relative, for example `/assets/food/510000-food-ai.png`.
