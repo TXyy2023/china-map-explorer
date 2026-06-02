@@ -1,129 +1,254 @@
+/**
+ * ==========================================
+ * 宗教信仰文化区交互地图主程序
+ * ==========================================
+ */
+
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { forceCollide, forceSimulation, forceX, forceY } from 'd3-force';
+import {
+  ComposableMap,
+  Geographies,
+  Geography,
+} from 'react-simple-maps';
 import { geoIdentity, geoPath } from 'd3-geo';
+import { createMachine, assign } from 'xstate';
+import { useMachine } from '@xstate/react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import {
   ArrowLeft,
+  Bot,
   Check,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  Layers,
+  Image as ImageIcon,
+  Landmark,
+  Loader2,
   MapPin,
-  MousePointer2,
+  PanelRightOpen,
   RefreshCw,
-  Shirt,
+  Save,
+  Sparkles,
+  Trophy,
+  HelpCircle,
+  Award,
 } from 'lucide-react';
 import {
-  CULTURE_THEMES,
+  FLOW_STEPS,
+  DEFAULT_FOOD_THEME,
+  FOOD_IMAGE_ASSET,
   buildProvinceAreaMap,
-  getDefaultAreaId,
   getAreaById,
-  getThemeById,
 } from './foodMapConfig.js';
-import {
-  getCultureModule,
-  normalizeCultureItems,
-} from './cultureModules.js';
 import { useFoodMapStore } from './useFoodMapStore.js';
 
+// 中国省级地图 GeoJSON 边界数据路径
 const GEO_URL = '/geo/china.json';
-const MAP_PADDING = 28;
-const FALLBACK_STAGE_SIZE = { width: 980, height: 680 };
-const DEFAULT_AREA_ID = 'sichuan-chongqing-food';
-const AREA_PIN_MAX_ITEMS = 12;
-const PIN_SAFE_X = 66;
-const PIN_SAFE_TOP = 66;
-const PIN_SAFE_BOTTOM = 86;
-const PIN_COLLISION_RADIUS = 64;
-const PIN_LAYOUT_TICKS = 220;
-const PIN_LEAVE_MS = 680;
+// 自适应地图的默认兜底尺寸
+const FALLBACK_MAP_SIZE = { height: 560, width: 960 };
+// 地图在画布容器中的边缘填充边距
+const MAP_PADDING = 20;
+const FOOD_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
+const PROVINCE_LABEL_OFFSETS = {
+  '110000': { area: [-16, -12], country: [-8, -12], province: [-16, -12] },
+  '120000': { area: [24, 8], country: [20, 6], province: [24, 8] },
+  '310000': { area: [26, 2], country: [22, 0], province: [26, 2] },
+  '810000': { area: [32, 15], country: [28, 12], province: [32, 15] },
+  '820000': { area: [-34, 20], country: [-30, 18], province: [-34, 20] },
+};
+
+const SITE_THEME_OPTIONS = [
+  { id: 'dark-ink', label: '玄墨', notice: '系统视觉已切换为：玄墨科技风 ✦' },
+  { id: 'light-xuan', label: '宣纸', notice: '系统视觉已切换为：典雅宣纸风 ❀' },
+  { id: 'emerald-shanshui', label: '黛绿', notice: '系统视觉已切换为：黛绿山水风 ❈' },
+  { id: 'crimson-palace', label: '宫红', notice: '系统视觉已切换为：宫红礼乐风' },
+  { id: 'porcelain-blue', label: '青瓷', notice: '系统视觉已切换为：青瓷雅集风' },
+  { id: 'market-night', label: '灯火', notice: '系统视觉已切换为：灯火庙会风' },
+];
+
+/**
+ * 由 XState 严谨驱动的视图状态机
+ * 精准管控：运行/开发模式、开发流程步骤、当前聚焦选中的文化区状态
+ */
+const mapMachine = createMachine({
+  id: 'religionCultureMap',
+  initial: 'country', // 默认状态为全国视图
+  context: {
+    appMode: 'run',    // 运作模式：'run' 运行浏览，'dev' AI自主开发
+    flowStep: 'select', // 当前进行到的开发工序
+    selectedAreaId: 'north-ancestor-ritual', // 当前聚焦的信仰文化区 ID
+  },
+  on: {
+    // 动作事件：返回全国视图
+    BACK_COUNTRY: {
+      target: '.country',
+      actions: assign({
+        flowStep: 'select',
+      }),
+    },
+    // 动作事件：选中特定信仰文化区
+    SELECT_AREA: {
+      target: '.area',
+      actions: assign({
+        selectedAreaId: ({ event }) => event.areaId,
+      }),
+    },
+    // 动作事件：变更开发流程控制步骤
+    SET_FLOW_STEP: {
+      actions: assign({
+        flowStep: ({ event }) => event.flowStep,
+      }),
+    },
+    // 动作事件：切换工作模式
+    SET_MODE: {
+      actions: assign({
+        appMode: ({ event }) => event.appMode,
+      }),
+    },
+  },
+  states: {
+    area: {},    // 区域聚焦渲染详情
+    country: {}, // 全国视图大盘
+  },
+});
+
+/**
+ * 校验开发模式下绑定 AI 图片表单输入的 Schema 规则 (Zod)
+ */
+const mcpFormSchema = z.object({
+  areaId: z.string().min(1, '请选择文化区'),
+  height: z.coerce.number().min(96, '图片高度不能小于96px').max(260, '图片高度不能大于260px'),
+  lng: z.coerce.number().min(73, '经度范围不合法').max(136, '经度范围不合法'),
+  style: z.string().min(2, '绘图风格描述太短').max(80, '绘图风格描述太长'),
+  width: z.coerce.number().min(140, '图片宽度不能小于140px').max(360, '图片宽度不能大于360px'),
+  lat: z.coerce.number().min(18, '纬度范围不合法').max(54, '纬度范围不合法'),
+});
+
+/**
+ * 获取当前 Node.js MCP 桥接服务端注册的全部工具
+ */
+async function getMcpTools() {
+  const response = await fetch('/api/mcp/tools');
+  if (!response.ok) throw new Error('MCP 桥接工具不可用');
+  return response.json();
+}
+
+async function getImageAssets() {
+  const response = await fetch('/api/assets');
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || '图片资产库不可用');
+  }
+  return payload;
+}
+
+async function saveImageAssetPrompt({ assetId, prompt }) {
+  const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}`, {
+    body: JSON.stringify({ prompt }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PATCH',
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || '保存图片 Prompt 失败');
+  }
+  return payload.asset;
+}
+
+async function regenerateImageAsset({ assetId, prompt }) {
+  const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}/regenerate`, {
+    body: JSON.stringify({ prompt }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || '重新生成图片失败');
+  }
+  return payload;
+}
+
+/**
+ * 通用执行指定 MCP 桥接工具的方法
+ */
+async function runMcpTool({ tool, params }) {
+  const response = await fetch('/api/mcp/run', {
+    body: JSON.stringify({ params, tool }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || `MCP 工具执行失败: ${tool}`);
+  }
+  return payload.result;
+}
+
+/**
+ * 异步拉取中国省级行政边界的 GeoJSON 数据
+ */
 async function loadChinaGeography() {
   const response = await fetch(GEO_URL);
   if (!response.ok) throw new Error('中国地图数据加载失败');
   return response.json();
 }
 
-function stripQuery(path = '') {
-  return String(path).split('?')[0];
-}
-
-function withVersion(src, versions) {
-  const clean = stripQuery(src);
-  const version = versions[clean];
-  return version ? `${clean}?v=${version}` : clean;
-}
-
+/**
+ * 将 GeoJSON 要素集合组装为 FeatureCollection 格式
+ */
 function buildFeatureCollection(features = []) {
   return {
-    type: 'FeatureCollection',
     features,
+    type: 'FeatureCollection',
   };
 }
 
-function boundsFromFeatures(features, pathGenerator) {
-  if (!features.length || !pathGenerator) return null;
+/**
+ * 监听画布大小改变，实现一屏式完美自适应布局的 ResizeObserver 自定义 Hook
+ */
+function useElementSize(fallbackSize = FALLBACK_MAP_SIZE) {
+  const ref = useRef(null);
+  const [size, setSize] = useState(fallbackSize);
 
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  let found = false;
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
 
-  features.forEach((feature) => {
-    const bounds = pathGenerator.bounds(feature);
-    if (!bounds) return;
-    x0 = Math.min(x0, bounds[0][0]);
-    y0 = Math.min(y0, bounds[0][1]);
-    x1 = Math.max(x1, bounds[1][0]);
-    y1 = Math.max(y1, bounds[1][1]);
-    found = true;
-  });
+    function updateSize() {
+      const rect = element.getBoundingClientRect();
+      setSize({
+        height: Math.max(280, Math.round(rect.height)),
+        width: Math.max(300, Math.round(rect.width)),
+      });
+    }
 
-  if (!found) return null;
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, size];
 }
 
-function buildImageFrame(targetBounds, bitmapBounds) {
-  if (!targetBounds || !bitmapBounds?.bbox || bitmapBounds.bbox.w <= 0 || bitmapBounds.bbox.h <= 0) {
-    return targetBounds;
-  }
-
-  const scaleX = targetBounds.w / bitmapBounds.bbox.w;
-  const scaleY = targetBounds.h / bitmapBounds.bbox.h;
-
-  return {
-    x: targetBounds.x - bitmapBounds.bbox.x * scaleX,
-    y: targetBounds.y - bitmapBounds.bbox.y * scaleY,
-    w: bitmapBounds.width * scaleX,
-    h: bitmapBounds.height * scaleY,
-  };
-}
-
-function clamp(value, min, max) {
+function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function getPinBounds(stageSize, pinScale = 1) {
-  const safeX = Math.max(24, PIN_SAFE_X * pinScale * 0.78);
-  const safeTop = Math.max(26, PIN_SAFE_TOP * pinScale * 0.82);
-  const safeBottom = Math.max(30, PIN_SAFE_BOTTOM * pinScale * 0.82);
-
-  return {
-    maxX: Math.max(safeX, stageSize.width - safeX),
-    maxY: Math.max(safeTop, stageSize.height - safeBottom),
-    minX: safeX,
-    minY: safeTop,
-  };
+function getProvinceShortName(name = '') {
+  return name
+    .replace(/特别行政区$/, '')
+    .replace(/维吾尔自治区$/, '')
+    .replace(/壮族自治区$/, '')
+    .replace(/回族自治区$/, '')
+    .replace(/自治区$/, '')
+    .replace(/[省市]$/, '');
 }
 
-function clampPinPoint(point, stageSize, pinScale = 1) {
-  const bounds = getPinBounds(stageSize, pinScale);
-  return {
-    x: clamp(point.x, bounds.minX, bounds.maxX),
-    y: clamp(point.y, bounds.minY, bounds.maxY),
-  };
+function getProvinceLabelOffset(adcode, viewLevel) {
+  const offset = PROVINCE_LABEL_OFFSETS[String(adcode)];
+  return offset?.[viewLevel] || offset?.country || [0, 0];
 }
 
 function hashString(input = '') {
@@ -146,1271 +271,1571 @@ function seededRandom(seed) {
   };
 }
 
-function seededShuffle(items, seedInput) {
-  const next = [...items];
-  const random = seededRandom(hashString(String(seedInput)));
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-  }
-  return next;
+function getDefaultFoodArea(areaId) {
+  return DEFAULT_FOOD_THEME.areas.find((area) => area.id === areaId);
 }
 
-function selectEvenlyByProvince(items, provinceAdcodes = [], maxItems = AREA_PIN_MAX_ITEMS, seedInput = '') {
-  if (items.length <= maxItems) return items;
+function normalizeFoodItems(area) {
+  if (!area) return [];
+  const defaultArea = getDefaultFoodArea(area.id);
+  const configuredItems = area.foodItems?.length ? area.foodItems : defaultArea?.foodItems;
+  const items = configuredItems?.length
+    ? configuredItems
+    : (area.assets || []).map((asset) => ({
+        id: `food-${asset.id}`,
+        image: asset.src,
+        name: asset.title.replace('图', ''),
+        provinceAdcode: asset.provinceAdcode,
+        process: ['识别核心场景', '梳理信仰关键词', '连接区域省份', '转化为 UI 热点'],
+      }));
 
-  const order = provinceAdcodes.map(String);
-  const buckets = new Map(order.map((adcode) => [adcode, []]));
-  const fallback = [];
-
-  items.forEach((item) => {
-    const key = String(item.provinceAdcode || '');
-    if (buckets.has(key)) {
-      buckets.get(key).push(item);
-    } else {
-      fallback.push(item);
-    }
-  });
-
-  order.forEach((adcode, index) => {
-    buckets.set(adcode, seededShuffle(buckets.get(adcode), `${seedInput}:${adcode}:${index}`));
-  });
-
-  const selected = [];
-  let cursor = 0;
-  while (selected.length < maxItems) {
-    const before = selected.length;
-    order.forEach((adcode) => {
-      if (selected.length >= maxItems) return;
-      const bucket = buckets.get(adcode);
-      if (bucket?.[cursor]) selected.push(bucket[cursor]);
-    });
-    cursor += 1;
-    if (before === selected.length) break;
-  }
-
-  if (selected.length < maxItems && fallback.length) {
-    selected.push(...seededShuffle(fallback, `${seedInput}:fallback`).slice(0, maxItems - selected.length));
-  }
-
-  return selected;
-}
-
-function sampleAreaItems(area, cultureModule, maxItems, seedInput) {
-  const items = normalizeCultureItems(area, cultureModule);
-  return selectEvenlyByProvince(items, area?.provinceAdcodes || [], maxItems, seedInput);
-}
-
-function useElementSize(fallback = FALLBACK_STAGE_SIZE) {
-  const ref = useRef(null);
-  const [size, setSize] = useState(fallback);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return undefined;
-
-    function measure() {
-      const rect = element.getBoundingClientRect();
-      setSize({
-        width: Math.max(360, Math.round(rect.width)),
-        height: Math.max(360, Math.round(rect.height)),
-      });
-    }
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  return [ref, size];
-}
-
-function useBitmapVisibleBounds(src) {
-  const [bounds, setBounds] = useState(null);
-
-  useEffect(() => {
-    if (!src) {
-      setBounds(null);
-      return undefined;
-    }
-
-    let cancelled = false;
-    const image = new Image();
-    image.decoding = 'async';
-    image.onload = () => {
-      if (cancelled) return;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = image.naturalWidth || image.width;
-      canvas.height = image.naturalHeight || image.height;
-      const context = canvas.getContext('2d', { willReadFrequently: true });
-      context.drawImage(image, 0, 0);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let x0 = Infinity;
-      let y0 = Infinity;
-      let x1 = -Infinity;
-      let y1 = -Infinity;
-
-      for (let y = 0; y < canvas.height; y += 1) {
-        for (let x = 0; x < canvas.width; x += 1) {
-          const alpha = pixels[(y * canvas.width + x) * 4 + 3];
-          if (alpha > 16) {
-            x0 = Math.min(x0, x);
-            y0 = Math.min(y0, y);
-            x1 = Math.max(x1, x);
-            y1 = Math.max(y1, y);
-          }
-        }
-      }
-
-      setBounds({
-        width: canvas.width,
-        height: canvas.height,
-        bbox: x1 >= x0
-          ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
-          : { x: 0, y: 0, w: canvas.width, h: canvas.height },
-      });
-    };
-    image.onerror = () => {
-      if (!cancelled) setBounds(null);
-    };
-    image.src = src;
-
-    return () => {
-      cancelled = true;
-    };
-  }, [src]);
-
-  return bounds;
-}
-
-function getAssetForView(theme, viewLevel, area, provinceAdcode) {
-  if (viewLevel === 'country') {
-    return {
-      src: theme.chinaAsset?.src || (theme.moduleId === 'food' ? '/assets/food/china-food-ai.png' : ''),
-      title: theme.labels?.sidebarTitle || theme.name,
-    };
-  }
-
-  if (viewLevel === 'area' && area) {
-    return {
-      src: area.summaryAsset?.src,
-      title: area.summaryAsset?.title || area.name,
-    };
-  }
-
-  if (viewLevel === 'province' && area && provinceAdcode) {
-    const asset = area.assets?.find((item) => String(item.provinceAdcode) === String(provinceAdcode));
-    return asset ? { src: asset.src, title: asset.title } : null;
-  }
-
-  return null;
-}
-
-function formatProvinceName(feature) {
-  return feature?.properties?.name || feature?.properties?.fullname || '未知区块';
-}
-
-function pointFromFeature(feature, pathGenerator, fallbackPoint) {
-  if (!feature || !pathGenerator) return fallbackPoint;
-  const centroid = pathGenerator.centroid(feature);
-  if (Number.isFinite(centroid?.[0]) && Number.isFinite(centroid?.[1])) {
-    return { x: centroid[0], y: centroid[1] };
-  }
-  const bounds = boundsFromFeatures([feature], pathGenerator);
-  if (bounds) return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
-  return fallbackPoint;
-}
-
-function buildCurvePath(origin, target, random) {
-  const distance = Math.hypot(target.x - origin.x, target.y - origin.y);
-  const lift = clamp(distance * 0.18, 34, 88);
-  const side = random() > 0.5 ? 1 : -1;
-  const control = {
-    x: (origin.x + target.x) / 2 + side * (24 + random() * 64),
-    y: (origin.y + target.y) / 2 - lift + (random() - 0.5) * 42,
-  };
-  return `M ${origin.x.toFixed(1)} ${origin.y.toFixed(1)} Q ${control.x.toFixed(1)} ${control.y.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`;
-}
-
-function fallbackAreaBounds(stageSize) {
-  return {
-    x: stageSize.width * 0.22,
-    y: stageSize.height * 0.18,
-    w: stageSize.width * 0.56,
-    h: stageSize.height * 0.58,
-  };
-}
-
-function pinScaleForCount(itemCount, stageSize, scopeMode) {
-  if (!itemCount) return 1;
-
-  const available = stageSize.width * stageSize.height * (scopeMode === 'country' ? 0.44 : 0.42);
-  const footprint = 118 * 118;
-  const naturalScale = Math.sqrt(available / Math.max(itemCount * footprint, 1));
-  if (scopeMode === 'country') {
-    return Number(clamp(naturalScale * 1.14, 0.54, 0.74).toFixed(3));
-  }
-  return Number(clamp(naturalScale, 0.52, 1).toFixed(3));
-}
-
-function buildLeaveVector(target, stageSize, random) {
-  const center = { x: stageSize.width / 2, y: stageSize.height / 2 };
-  let directionX = target.x - center.x;
-  let directionY = target.y - center.y;
-  const length = Math.hypot(directionX, directionY);
-
-  if (length < 1) {
-    const angle = random() * Math.PI * 2;
-    directionX = Math.cos(angle);
-    directionY = Math.sin(angle);
-  } else {
-    directionX /= length;
-    directionY /= length;
-  }
-
-  const distance = Math.max(stageSize.width, stageSize.height) * 0.86 + 180;
-  return {
-    x: directionX * distance,
-    y: directionY * distance,
-  };
-}
-
-function targetPointForItem({ areaBounds, index, itemCount, origin, pinScale, random, stageSize }) {
-  const area = areaBounds || fallbackAreaBounds(stageSize);
-
-  const center = {
-    x: area.x + area.w / 2,
-    y: area.y + area.h / 2,
-  };
-  const halfWidth = Math.max(area.w / 2, 1);
-  const halfHeight = Math.max(area.h / 2, 1);
-  let directionX = clamp((origin.x - center.x) / halfWidth, -1, 1);
-  let directionY = clamp((origin.y - center.y) / halfHeight, -1, 1);
-  const length = Math.hypot(directionX, directionY);
-
-  if (length < 0.16) {
-    const fallbackAngle = (index / Math.max(itemCount, 1)) * Math.PI * 2 + (random() - 0.5) * 0.42;
-    directionX = Math.cos(fallbackAngle);
-    directionY = Math.sin(fallbackAngle);
-  } else {
-    directionX /= length;
-    directionY /= length;
-  }
-
-  const tangentX = -directionY;
-  const tangentY = directionX;
-  const siblingOffset = itemCount > 1 ? index - (itemCount - 1) / 2 : 0;
-  const tangentSpread = clamp(380 / Math.max(itemCount, 1), 46, 76);
-  const radialGap = 92 + random() * 56;
-  const anchor = {
-    x: center.x + directionX * (halfWidth + radialGap),
-    y: center.y + directionY * (halfHeight + radialGap),
-  };
-
-  return clampPinPoint({
-    x: anchor.x + tangentX * siblingOffset * tangentSpread + (random() - 0.5) * 74,
-    y: anchor.y + tangentY * siblingOffset * tangentSpread + (random() - 0.5) * 66,
-  }, stageSize, pinScale);
-}
-
-function targetPointForCountryItem({ index, itemCount, origin, pinScale, random, stageSize }) {
-  const ring = 18 + (index % 4) * 8;
-  const angle = (index / Math.max(itemCount, 1)) * Math.PI * 2 + random() * 0.82;
-  return clampPinPoint({
-    x: origin.x + Math.cos(angle) * ring + (random() - 0.5) * 26,
-    y: origin.y + Math.sin(angle) * ring + (random() - 0.5) * 22,
-  }, stageSize, pinScale);
-}
-
-function clampPinNode(node, bounds) {
-  const nextX = clamp(node.x, bounds.minX, bounds.maxX);
-  const nextY = clamp(node.y, bounds.minY, bounds.maxY);
-  if (nextX !== node.x) node.vx = 0;
-  if (nextY !== node.y) node.vy = 0;
-  node.x = nextX;
-  node.y = nextY;
-}
-
-function resolvePinTargets(baseLayouts, stageSize, pinScale, scopeMode) {
-  if (scopeMode === 'country') {
-    return baseLayouts.map((layout) => ({
-      ...layout,
-      target: layout.anchor,
-    }));
-  }
-
-  if (baseLayouts.length < 2) {
-    return baseLayouts.map((layout) => ({
-      ...layout,
-      target: layout.anchor,
-    }));
-  }
-
-  const bounds = getPinBounds(stageSize, pinScale);
-  const collisionRadius = Math.max(30, PIN_COLLISION_RADIUS * pinScale);
-  const attractStrength = baseLayouts.length > 12 ? 0.08 : 0.22;
-  const nodes = baseLayouts.map((layout) => ({
-    ...layout,
-    targetX: layout.anchor.x,
-    targetY: layout.anchor.y,
-    x: layout.anchor.x,
-    y: layout.anchor.y,
-  }));
-  const simulationSeed = hashString(nodes.map((node) => `${node.item.id}:${node.targetX.toFixed(1)}:${node.targetY.toFixed(1)}`).join('|'));
-  const simulation = forceSimulation(nodes)
-    .randomSource(seededRandom(simulationSeed))
-    .alpha(1)
-    .alphaMin(0.001)
-    .velocityDecay(0.42)
-    .force('x', forceX((node) => node.targetX).strength(attractStrength))
-    .force('y', forceY((node) => node.targetY).strength(attractStrength))
-    .force('collide', forceCollide(collisionRadius).strength(1).iterations(8))
-    .stop();
-
-  for (let tick = 0; tick < PIN_LAYOUT_TICKS; tick += 1) {
-    simulation.tick();
-    nodes.forEach((node) => clampPinNode(node, bounds));
-  }
-
-  simulation.stop();
-
-  return nodes.map((node) => ({
-    ...node,
-    target: clampPinPoint({ x: node.x, y: node.y }, stageSize, pinScale),
+  return items.map((item, index) => ({
+    accent: item.accent || area.color,
+    areaId: area.id,
+    areaName: area.name,
+    id: item.id || `${area.id}-food-${index}`,
+    image: item.image || item.src || area.summaryAsset?.src,
+    name: item.name || item.title || `文化线索 ${index + 1}`,
+    objectPosition: item.objectPosition || '50% 50%',
+    process: item.process?.length ? item.process : ['识别场景', '提取关键词', '关联省份', '形成讲解卡'],
+    provinceAdcode: item.provinceAdcode || area.provinceAdcodes?.[0],
   }));
 }
 
-function buildCultureItemLayouts({
-  activeAreas,
-  cultureModule,
-  features,
-  highlightProvinceAdcode,
-  nonce,
-  pathGenerator,
-  scopeMode,
-  stageSize,
-}) {
-  const scopedItems = (activeAreas || []).flatMap((area) => (
-    sampleAreaItems(
-      area,
-      cultureModule,
-      AREA_PIN_MAX_ITEMS,
-      `${scopeMode}:${area.id}:${nonce}:pin-sample`,
-    ).map((item) => ({ area, item }))
-  ));
-  if (!scopedItems.length || !stageSize.width || !stageSize.height) return [];
-
-  const scopeAdcodes = new Set(activeAreas.flatMap((area) => area.provinceAdcodes || []).map(String));
-  const scopeFeatures = scopeAdcodes.size
-    ? features.filter((feature) => scopeAdcodes.has(String(feature.properties.adcode)))
-    : features;
-  const activeAreaBounds = boundsFromFeatures(scopeFeatures.length ? scopeFeatures : features, pathGenerator)
-    || fallbackAreaBounds(stageSize);
-  const areaCenter = activeAreaBounds
-    ? { x: activeAreaBounds.x + activeAreaBounds.w / 2, y: activeAreaBounds.y + activeAreaBounds.h / 2 }
-    : { x: stageSize.width / 2, y: stageSize.height / 2 };
-  const itemCount = scopedItems.length;
-  const pinScale = pinScaleForCount(itemCount, stageSize, scopeMode);
-  const highlightedProvince = highlightProvinceAdcode ? String(highlightProvinceAdcode) : '';
-
-  const baseLayouts = scopedItems.map(({ area, item }, index) => {
-    const layoutSeed = `${scopeMode}:${area.id}:${item.id}:${index}:${nonce}:${stageSize.width}:${stageSize.height}`;
-    const random = seededRandom(hashString(layoutSeed));
-    const provinceFeature = features.find((feature) => String(feature.properties.adcode) === String(item.provinceAdcode));
-    const origin = pointFromFeature(provinceFeature, pathGenerator, areaCenter);
-    const anchor = scopeMode === 'country'
-      ? targetPointForCountryItem({ index, itemCount, origin, pinScale, random, stageSize })
-      : targetPointForItem({ areaBounds: activeAreaBounds, index, itemCount, origin, pinScale, random, stageSize });
-
-    return {
-      anchor,
-      area,
-      curveRandom: seededRandom(hashString(`${layoutSeed}:curve`)),
-      item,
-      origin,
-      pinScale,
-    };
-  });
-
-  return resolvePinTargets(baseLayouts, stageSize, pinScale, scopeMode).map((layout) => {
-    const { item, origin, target } = layout;
-    const itemProvince = item.provinceAdcode ? String(item.provinceAdcode) : '';
-    const leaveRandom = seededRandom(hashString(`${scopeMode}:${layout.area.id}:${item.id}:${nonce}:leave`));
-    const leave = buildLeaveVector(target, stageSize, leaveRandom);
-
-    return {
-      ...item,
-      areaId: layout.area.id,
-      areaName: layout.area.name,
-      curvePath: buildCurvePath(origin, target, layout.curveRandom),
-      dimmed: Boolean(highlightedProvince && itemProvince && itemProvince !== highlightedProvince),
-      focused: Boolean(highlightedProvince && itemProvince && itemProvince === highlightedProvince),
-      leave,
-      origin,
-      pinScale: layout.pinScale,
-      target,
-      travel: {
-        x: origin.x - target.x,
-        y: origin.y - target.y,
-      },
-    };
-  });
-}
-
-function CultureMapPins({
-  assetVersions,
-  cultureModule,
-  itemLayouts,
-  layerPhase,
-  onLayerMouseEnter,
-  onLayerMouseLeave,
-  onSelectFood,
-  selectedFood,
-  stageSize,
-}) {
-  if (!itemLayouts.length) return null;
-
+function isInsideRect(point, rect, padding = 0) {
+  if (!rect) return false;
   return (
-    <div
-      className={`culture-map-pins ${layerPhase === 'leaving' ? 'is-leaving' : 'is-active'}`}
-      aria-label={cultureModule.itemNoun}
-      onMouseEnter={onLayerMouseEnter}
-      onMouseLeave={onLayerMouseLeave}
-    >
-      <svg
-        className="culture-pin-curves"
-        aria-hidden="true"
-        height={stageSize.height}
-        viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
-        width={stageSize.width}
-      >
-        {itemLayouts.map((item) => (
-          <g className={item.dimmed ? 'is-dimmed' : ''} key={`curve-${item.id}`}>
-            <path
-              className="culture-origin-curve"
-              d={item.curvePath}
-              style={{ '--food-accent': item.accent }}
-            />
-            <circle
-              className="culture-origin-dot"
-              cx={item.origin.x}
-              cy={item.origin.y}
-              r={item.focused ? 4.6 : 3.4}
-              style={{ '--food-accent': item.accent }}
-            />
-          </g>
-        ))}
-      </svg>
-
-      {itemLayouts.map((item) => {
-        const selected = selectedFood?.id === item.id && selectedFood?.areaId === item.areaId;
-        const pinScale = item.pinScale || 1;
-        return (
-          <button
-            aria-pressed={selected}
-            className={[
-              'culture-pin',
-              selected ? 'is-selected' : '',
-              item.dimmed ? 'is-dimmed' : '',
-              item.focused ? 'is-province-focus' : '',
-            ].join(' ')}
-            key={`${item.areaId}-${item.id}`}
-            onClick={() => onSelectFood(item)}
-            style={{
-              '--food-accent': item.accent,
-              '--leave-x': `${item.leave.x}px`,
-              '--leave-y': `${item.leave.y}px`,
-              '--pin-x': `${item.target.x}px`,
-              '--pin-y': `${item.target.y}px`,
-              '--pin-scale': pinScale,
-              '--pin-dim-scale': Math.max(0.38, pinScale * 0.82).toFixed(3),
-              '--pin-enter-scale': Math.max(0.16, pinScale * 0.24).toFixed(3),
-              '--pin-focus-scale': Math.min(1.18, pinScale * 1.14).toFixed(3),
-              '--pin-hover-scale': Math.min(1.12, pinScale * 1.05).toFixed(3),
-              '--pin-leave-scale': Math.max(0.12, pinScale * 0.18).toFixed(3),
-              '--travel-x': `${item.travel.x}px`,
-              '--travel-y': `${item.travel.y}px`,
-            }}
-            title={item.name}
-            type="button"
-          >
-            <span className="culture-pin-image">
-              <img
-                alt={item.name}
-                draggable="false"
-                src={withVersion(item.image, assetVersions)}
-                style={{ objectPosition: item.objectPosition || '50% 50%' }}
-              />
-            </span>
-            <span className="culture-pin-label">{item.name}</span>
-          </button>
-        );
-      })}
-    </div>
+    point.x >= rect.x - padding
+    && point.x <= rect.x + rect.w + padding
+    && point.y >= rect.y - padding
+    && point.y <= rect.y + rect.h + padding
   );
 }
 
-function InteractiveMap({
-  assetVersions,
-  cultureModule,
-  currentArea,
-  hoveredAdcode,
-  hoveredAreaId,
-  onHoverProvince,
-  onSelectArea,
-  onSelectFood,
-  onSelectProvince,
-  selectedFood,
-  selectedProvinceAdcode,
-  setHoveredAreaId,
-  showAiFill,
-  showFoodPins,
-  theme,
-  viewLevel,
-}) {
-  const [stageRef, stageSize] = useElementSize();
-  const [cursor, setCursor] = useState(null);
-  const hoverClearTimerRef = useRef(null);
-  const pinClearTimerRef = useRef(null);
-  const pinLayerSerialRef = useRef(0);
-  const [pinLayers, setPinLayers] = useState([]);
-  const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
+function distanceBetween(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
 
-  const { data: chinaGeoJson, isLoading, error } = useQuery({
+function buildFoodItemLayout(items, mapSize, focusBounds, viewLevel, areaId) {
+  const width = mapSize?.width || FALLBACK_MAP_SIZE.width;
+  const height = mapSize?.height || FALLBACK_MAP_SIZE.height;
+  const isDetailView = viewLevel !== 'country';
+  const baseSize = isDetailView
+    ? clampNumber(Math.min(width, height) * 0.092, 54, 72)
+    : clampNumber(Math.min(width, height) * 0.12, 58, 82);
+  const safeX = baseSize / 2 + 18;
+  const safeTop = baseSize / 2 + 28;
+  const safeBottom = baseSize / 2 + (isDetailView ? 148 : 78);
+  const random = seededRandom(hashString(`${areaId}-${viewLevel}-${items.length}-${Math.round(width)}-${Math.round(height)}`));
+  const focus = focusBounds || {
+    h: height * 0.58,
+    w: width * 0.58,
+    x: width * 0.21,
+    y: height * 0.18,
+  };
+  const focusCenter = {
+    x: clampNumber(focus.x + focus.w / 2, safeX, width - safeX),
+    y: clampNumber(focus.y + focus.h / 2, safeTop, height - safeBottom),
+  };
+  const avoidRect = viewLevel === 'country'
+    ? { h: height * 0.56, w: width * 0.48, x: width * 0.26, y: height * 0.2 }
+    : { h: focus.h * 0.76, w: focus.w * 0.78, x: focus.x + focus.w * 0.11, y: focus.y + focus.h * 0.12 };
+  const candidates = [];
+
+  function pushCandidate(x, y, weight = 1) {
+    candidates.push({
+      weight,
+      x: clampNumber(x, safeX, width - safeX),
+      y: clampNumber(y, safeTop, Math.max(safeTop, height - safeBottom)),
+    });
+  }
+
+  const fixedSlots = [
+    [0.14, 0.2], [0.34, 0.13], [0.66, 0.14], [0.86, 0.22],
+    [0.88, 0.48], [0.78, 0.72], [0.53, 0.82], [0.26, 0.74],
+    [0.12, 0.52], [0.42, 0.7], [0.62, 0.32], [0.2, 0.35],
+  ];
+
+  fixedSlots.forEach(([xRatio, yRatio]) => {
+    pushCandidate(
+      width * xRatio + (random() - 0.5) * baseSize * 0.9,
+      height * yRatio + (random() - 0.5) * baseSize * 0.9,
+      1.15,
+    );
+  });
+
+  const ringCount = Math.max(48, items.length * 16);
+  const startAngle = random() * Math.PI * 2;
+  for (let index = 0; index < ringCount; index += 1) {
+    const angle = startAngle + index * FOOD_LAYOUT_GOLDEN_ANGLE;
+    const radiusJitter = 0.82 + random() * 0.4;
+    const radiusX = Math.max(focus.w * 0.5 + baseSize * 0.62, width * 0.16) * radiusJitter;
+    const radiusY = Math.max(focus.h * 0.5 + baseSize * 0.58, height * 0.17) * radiusJitter;
+    pushCandidate(
+      focusCenter.x + Math.cos(angle) * radiusX,
+      focusCenter.y + Math.sin(angle) * radiusY,
+      1,
+    );
+  }
+
+  const placed = [];
+  return items.map((item, itemIndex) => {
+    let bestCandidate = candidates[itemIndex % candidates.length] || focusCenter;
+    let bestScore = -Infinity;
+
+    candidates.forEach((candidate) => {
+      const minDistance = placed.length
+        ? Math.min(...placed.map((point) => distanceBetween(point, candidate)))
+        : Math.min(
+            distanceBetween(candidate, { x: width * 0.16, y: height * 0.16 }),
+            distanceBetween(candidate, { x: width * 0.84, y: height * 0.84 }),
+          );
+      const edgeComfort = Math.min(
+        candidate.x - safeX,
+        width - safeX - candidate.x,
+        candidate.y - safeTop,
+        height - safeBottom - candidate.y,
+      );
+      const centerDistance = distanceBetween(candidate, focusCenter);
+      const avoidPenalty = isInsideRect(candidate, avoidRect, -baseSize * 0.15)
+        ? (viewLevel === 'country' ? -88 : -145)
+        : 72;
+      const score =
+        minDistance * 1.85
+        + centerDistance * 0.18
+        + edgeComfort * 0.08
+        + avoidPenalty * candidate.weight
+        + random() * 18;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = candidate;
+      }
+    });
+
+    placed.push(bestCandidate);
+    const size = Math.round(baseSize + (random() - 0.5) * 14);
+    return {
+      ...item,
+      delay: itemIndex * 72,
+      rotate: Math.round((random() - 0.5) * 12),
+      size,
+      x: Math.round(bestCandidate.x),
+      y: Math.round(bestCandidate.y),
+    };
+  });
+}
+
+/**
+ * 地图图形渲染层：基于 React-Simple-Maps 并利用 D3-Geo 的自适应投影实现省份自适应定位
+ */
+function FoodMap({
+  assetVersions,
+  currentArea,
+  hoveredAreaId,
+  selectedFoodItem,
+  viewLevel,
+  onFoodItemSelect,
+  onHoverArea,
+  onSelectArea,
+  selectedProvinceAdcode,
+  onSelectProvince,
+  onViewLevelChange,
+  provinceAreaMap,
+  theme,
+}) {
+  const [mapStageRef, mapSize] = useElementSize();
+  const [foodBurstOrigin, setFoodBurstOrigin] = useState({
+    x: FALLBACK_MAP_SIZE.width / 2,
+    y: FALLBACK_MAP_SIZE.height / 2,
+  });
+  const [isFoodLayerReady, setIsFoodLayerReady] = useState(false);
+
+  function getVersionedAsset(src) {
+    const cleanSrc = String(src || '').split('?')[0];
+    const version = assetVersions[cleanSrc];
+    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+  }
+
+  function recordFoodOrigin(event) {
+    const stage = mapStageRef.current;
+    if (!stage || !event?.clientX || !event?.clientY) return;
+    const rect = stage.getBoundingClientRect();
+    setFoodBurstOrigin({
+      x: clampNumber(event.clientX - rect.left, 0, rect.width),
+      y: clampNumber(event.clientY - rect.top, 0, rect.height),
+    });
+  }
+
+  function handleAreaPointer(event, area) {
+    if (viewLevel !== 'country' || !area) return;
+    if (area.id !== hoveredAreaId) {
+      recordFoodOrigin(event);
+      onHoverArea(area.id);
+    }
+  }
+
+  // 用 React Query 异步拉取并缓存 GeoJSON
+  const { data: chinaGeoJson, isLoading: mapLoading } = useQuery({
     queryFn: loadChinaGeography,
     queryKey: ['china-geography'],
     staleTime: Infinity,
   });
 
-  const features = useMemo(
-    () => chinaGeoJson?.features?.filter((feature) => feature.properties?.adcode && feature.properties?.name) || [],
+  const validFeatures = useMemo(
+    () => chinaGeoJson?.features?.filter((geo) => geo.properties?.name && geo.properties?.adcode) || [],
     [chinaGeoJson],
   );
 
-  const currentAreaAdcodes = useMemo(
+  const visibleAdcodes = useMemo(
     () => new Set((currentArea?.provinceAdcodes || []).map(String)),
-    [currentArea],
+    [currentArea?.provinceAdcodes],
   );
 
-  const selectedProvinceFeature = useMemo(
-    () => features.find((feature) => String(feature.properties.adcode) === String(selectedProvinceAdcode)),
-    [features, selectedProvinceAdcode],
+  const activeFoodArea = useMemo(() => {
+    if (viewLevel === 'country') {
+      return getAreaById(theme, hoveredAreaId || currentArea?.id);
+    }
+    return currentArea;
+  }, [currentArea, hoveredAreaId, theme, viewLevel]);
+
+  const activeFoodItems = useMemo(
+    () => normalizeFoodItems(activeFoodArea),
+    [activeFoodArea],
   );
 
-  const focusFeatures = useMemo(() => {
-    if (viewLevel === 'area') {
-      return features.filter((feature) => currentAreaAdcodes.has(String(feature.properties.adcode)));
+  // 计算当前聚焦区域或省份所涵盖的地理要素集合
+  const focusedGeoJson = useMemo(() => {
+    if (viewLevel === 'country') {
+      return buildFeatureCollection(validFeatures);
+    } else if (viewLevel === 'area') {
+      return buildFeatureCollection(validFeatures.filter((geo) => visibleAdcodes.has(String(geo.properties.adcode))));
+    } else if (viewLevel === 'province') {
+      if (currentArea && visibleAdcodes.has(String(selectedProvinceAdcode))) {
+        // 属于当前信仰区，投影聚焦到整个信仰区，保持区域环境感
+        return buildFeatureCollection(validFeatures.filter((geo) => visibleAdcodes.has(String(geo.properties.adcode))));
+      } else {
+        // 独立省份，投影完美聚焦到该省份本身，屏幕自适应拉近
+        return buildFeatureCollection(validFeatures.filter((geo) => String(geo.properties.adcode) === String(selectedProvinceAdcode)));
+      }
     }
-    if (viewLevel === 'province' && selectedProvinceFeature) {
-      return [selectedProvinceFeature];
-    }
-    return features;
-  }, [currentAreaAdcodes, features, selectedProvinceFeature, viewLevel]);
+    return buildFeatureCollection(validFeatures);
+  }, [viewLevel, validFeatures, visibleAdcodes, selectedProvinceAdcode, currentArea]);
 
+  // 利用 D3-Geo 计算适应当前分辨率与纵横比的最优地图地理投影坐标转换
   const projection = useMemo(() => {
-    if (!focusFeatures.length) {
-      return geoIdentity().reflectY(true).translate([stageSize.width / 2, stageSize.height / 2]);
+    if (!focusedGeoJson.features.length) {
+      return geoIdentity().reflectY(true).translate([mapSize.width / 2, mapSize.height / 2]);
     }
-
     return geoIdentity().reflectY(true).fitExtent(
-      [[MAP_PADDING, MAP_PADDING], [stageSize.width - MAP_PADDING, stageSize.height - MAP_PADDING]],
-      buildFeatureCollection(focusFeatures),
+      [[MAP_PADDING, MAP_PADDING], [mapSize.width - MAP_PADDING, mapSize.height - MAP_PADDING]],
+      focusedGeoJson,
     );
-  }, [focusFeatures, stageSize]);
+  }, [focusedGeoJson, mapSize]);
 
   const pathGenerator = useMemo(() => geoPath().projection(projection), [projection]);
 
-  const countryBounds = useMemo(
-    () => boundsFromFeatures(features, pathGenerator),
-    [features, pathGenerator],
+  // 1. 计算全国省份的合并 bounds (外接矩形)
+  const chinaBounds = useMemo(() => {
+    if (!chinaGeoJson || !validFeatures.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    validFeatures.forEach(geo => {
+      const bounds = pathGenerator.bounds(geo);
+      if (bounds) {
+        x0 = Math.min(x0, bounds[0][0]);
+        y0 = Math.min(y0, bounds[0][1]);
+        x1 = Math.max(x1, bounds[1][0]);
+        y1 = Math.max(y1, bounds[1][1]);
+      }
+    });
+    return { h: y1 - y0, w: x1 - x0, x: x0, y: y0 };
+  }, [chinaGeoJson, validFeatures, pathGenerator]);
+
+  // 2. 计算当前激活大区的合并 bounds
+  const areaBounds = useMemo(() => {
+    if (!chinaGeoJson || !currentArea || !validFeatures.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    let found = false;
+    validFeatures.forEach(geo => {
+      if (visibleAdcodes.has(String(geo.properties.adcode))) {
+        const bounds = pathGenerator.bounds(geo);
+        if (bounds) {
+          x0 = Math.min(x0, bounds[0][0]);
+          y0 = Math.min(y0, bounds[0][1]);
+          x1 = Math.max(x1, bounds[1][0]);
+          y1 = Math.max(y1, bounds[1][1]);
+          found = true;
+        }
+      }
+    });
+    return found ? { h: y1 - y0, w: x1 - x0, x: x0, y: y0 } : null;
+  }, [chinaGeoJson, currentArea, validFeatures, visibleAdcodes, pathGenerator]);
+
+  // 3. 各省份的 bounds Map
+  const provinceBoundsMap = useMemo(() => {
+    const m = new Map();
+    if (!chinaGeoJson || !validFeatures.length) return m;
+    validFeatures.forEach(geo => {
+      const adcode = String(geo.properties.adcode);
+      const bounds = pathGenerator.bounds(geo);
+      if (bounds) {
+        m.set(adcode, {
+          h: bounds[1][1] - bounds[0][1],
+          w: bounds[1][0] - bounds[0][0],
+          x: bounds[0][0],
+          y: bounds[0][1]
+        });
+      }
+    });
+    return m;
+  }, [chinaGeoJson, validFeatures, pathGenerator]);
+
+  const provinceLabelItems = useMemo(() => {
+    if (!validFeatures.length) return [];
+    return validFeatures
+      .map((geo) => {
+        const adcode = String(geo.properties.adcode);
+        const centroid = pathGenerator.centroid(geo);
+        const fallback = geo.properties.centroid || geo.properties.center;
+        const projectedFallback = fallback ? projection(fallback) : null;
+        const x = Number.isFinite(centroid?.[0]) ? centroid[0] : projectedFallback?.[0];
+        const y = Number.isFinite(centroid?.[1]) ? centroid[1] : projectedFallback?.[1];
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const bounds = provinceBoundsMap.get(adcode);
+        const minSide = Math.min(bounds?.w || 0, bounds?.h || 0);
+        return {
+          adcode,
+          area: provinceAreaMap.get(adcode),
+          isTiny: minSide > 0 && minSide < 18,
+          name: geo.properties.name,
+          shortName: getProvinceShortName(geo.properties.name),
+          x,
+          y,
+        };
+      })
+      .filter(Boolean);
+  }, [pathGenerator, projection, provinceAreaMap, provinceBoundsMap, validFeatures]);
+
+  const foodFocusBounds = useMemo(() => {
+    if (viewLevel === 'province' && selectedProvinceAdcode) {
+      return provinceBoundsMap.get(String(selectedProvinceAdcode)) || areaBounds || chinaBounds;
+    }
+    if (!activeFoodArea || !validFeatures.length) return areaBounds || chinaBounds;
+    const activeAdcodes = new Set((activeFoodArea.provinceAdcodes || []).map(String));
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    let found = false;
+    validFeatures.forEach((geo) => {
+      if (!activeAdcodes.has(String(geo.properties.adcode))) return;
+      const bounds = pathGenerator.bounds(geo);
+      if (!bounds) return;
+      x0 = Math.min(x0, bounds[0][0]);
+      y0 = Math.min(y0, bounds[0][1]);
+      x1 = Math.max(x1, bounds[1][0]);
+      y1 = Math.max(y1, bounds[1][1]);
+      found = true;
+    });
+    return found ? { h: y1 - y0, w: x1 - x0, x: x0, y: y0 } : areaBounds || chinaBounds;
+  }, [activeFoodArea, areaBounds, chinaBounds, pathGenerator, provinceBoundsMap, selectedProvinceAdcode, validFeatures, viewLevel]);
+
+  const foodLayoutItems = useMemo(
+    () => buildFoodItemLayout(activeFoodItems, mapSize, foodFocusBounds, viewLevel, activeFoodArea?.id || 'country'),
+    [activeFoodArea?.id, activeFoodItems, foodFocusBounds, mapSize, viewLevel],
   );
 
-  const areaFeatures = useMemo(
-    () => features.filter((feature) => currentAreaAdcodes.has(String(feature.properties.adcode))),
-    [currentAreaAdcodes, features],
-  );
-
-  const areaBounds = useMemo(
-    () => boundsFromFeatures(areaFeatures, pathGenerator),
-    [areaFeatures, pathGenerator],
-  );
-
-  const provinceBounds = useMemo(
-    () => selectedProvinceFeature ? boundsFromFeatures([selectedProvinceFeature], pathGenerator) : null,
-    [pathGenerator, selectedProvinceFeature],
-  );
-
-  const fillFeatures = useMemo(() => {
-    if (viewLevel === 'area') return areaFeatures;
-    if (viewLevel === 'province' && selectedProvinceFeature) return [selectedProvinceFeature];
-    return features;
-  }, [areaFeatures, features, selectedProvinceFeature, viewLevel]);
-
-  const fillTargetBounds = viewLevel === 'province'
-    ? provinceBounds
-    : viewLevel === 'area'
-      ? areaBounds
-      : countryBounds;
-  const fillAsset = getAssetForView(theme, viewLevel, currentArea, selectedProvinceAdcode);
-  const fillSrc = showAiFill && fillAsset?.src ? withVersion(fillAsset.src, assetVersions) : '';
-  const bitmapBounds = useBitmapVisibleBounds(fillSrc);
-  const imageFrame = buildImageFrame(fillTargetBounds, bitmapBounds);
-  const activePinScope = useMemo(() => {
-    const hoveredArea = viewLevel === 'country' && hoveredAreaId
-      ? getAreaById(theme, hoveredAreaId)
-      : null;
-    const areas = viewLevel === 'country'
-      ? hoveredArea
-        ? [hoveredArea]
-        : []
-      : currentArea
-        ? [currentArea]
-        : [];
-    const mode = viewLevel === 'country'
-      ? hoveredArea
-        ? 'preview'
-        : 'country'
-      : 'area';
-    return {
-      areas,
-      key: `${theme.id}:${mode}:${areas.map((area) => area.id).join('|') || 'empty'}`,
-      mode,
-    };
-  }, [currentArea, hoveredAreaId, theme, viewLevel]);
-  const pinLayersWithLayouts = useMemo(
-    () => pinLayers.map((layer) => ({
-      ...layer,
-      itemLayouts: buildCultureItemLayouts({
-        activeAreas: layer.areas,
-        cultureModule,
-        features,
-        highlightProvinceAdcode: viewLevel === 'country' ? null : hoveredAdcode || selectedProvinceAdcode,
-        nonce: layer.nonce,
-        pathGenerator,
-        scopeMode: layer.mode,
-        stageSize,
-      }),
-    })).filter((layer) => layer.itemLayouts.length),
-    [cultureModule, features, hoveredAdcode, pathGenerator, pinLayers, selectedProvinceAdcode, stageSize, viewLevel],
-  );
-  const focusKey = `${viewLevel}:${currentArea?.id || 'country'}:${selectedProvinceAdcode || 'all'}`;
-
-  useEffect(() => () => {
-    window.clearTimeout(hoverClearTimerRef.current);
-    window.clearTimeout(pinClearTimerRef.current);
-  }, []);
+  const foodLayerKey = `${activeFoodArea?.id || 'country'}-${viewLevel}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}`;
 
   useEffect(() => {
-    window.clearTimeout(pinClearTimerRef.current);
-
-    if (activePinScope.areas.length) {
-      setPinLayers((prev) => {
-        const activeLayer = prev.find((layer) => layer.phase === 'active');
-        if (activeLayer?.scopeKey === activePinScope.key) return prev;
-
-        const nextNonce = pinLayerSerialRef.current + 1;
-        pinLayerSerialRef.current = nextNonce;
-        return [
-          ...prev.map((layer) => ({ ...layer, phase: 'leaving' })),
-          {
-            areas: activePinScope.areas,
-            id: `${activePinScope.key}:${nextNonce}`,
-            mode: activePinScope.mode,
-            nonce: nextNonce,
-            phase: 'active',
-            scopeKey: activePinScope.key,
-          },
-        ];
-      });
-      pinClearTimerRef.current = window.setTimeout(() => {
-        setPinLayers((prev) => prev.filter((layer) => layer.phase !== 'leaving'));
-      }, PIN_LEAVE_MS);
-      return undefined;
-    }
-
-    setPinLayers((prev) => prev.map((layer) => ({ ...layer, phase: 'leaving' })));
-    if (pinLayers.length) {
-      pinClearTimerRef.current = window.setTimeout(() => {
-        setPinLayers([]);
-      }, PIN_LEAVE_MS);
-    }
-
-    return undefined;
-  }, [activePinScope, pinLayers.length]);
-
-  function handlePointerMove(event, feature, area) {
-    window.clearTimeout(hoverClearTimerRef.current);
-    const rect = stageRef.current?.getBoundingClientRect();
-    if (rect) {
-      setCursor({
-        x: clamp(event.clientX - rect.left + 14, 12, rect.width - 260),
-        y: clamp(event.clientY - rect.top + 14, 12, rect.height - 110),
-        feature,
-        area,
-      });
-    }
-    onHoverProvince(String(feature.properties.adcode));
-    if (viewLevel === 'country') {
-      setHoveredAreaId(area?.id || null);
-    }
-  }
-
-  function clearCountryHoverWithAnimation() {
-    onHoverProvince(null);
-    setCursor(null);
-    if (viewLevel !== 'country') return;
-    window.clearTimeout(hoverClearTimerRef.current);
-    hoverClearTimerRef.current = window.setTimeout(() => {
-      setHoveredAreaId(null);
-    }, 90);
-  }
-
-  function selectFeature(feature) {
-    const adcode = String(feature.properties.adcode);
-    const area = provinceAreaMap.get(adcode);
-    if (viewLevel === 'country') {
-      if (area) onSelectArea(area.id);
-      if (theme.areas?.length) return;
-      onSelectProvince(adcode, formatProvinceName(feature));
-      return;
-    }
-    if (area && area.id !== currentArea?.id) {
-      onSelectArea(area.id);
-      return;
-    }
-    onSelectProvince(adcode, formatProvinceName(feature));
-  }
+    setIsFoodLayerReady(false);
+    const timer = window.setTimeout(() => setIsFoodLayerReady(true), 1160);
+    return () => window.clearTimeout(timer);
+  }, [foodLayerKey]);
 
   return (
-    <section
-      className="map-stage"
-      onMouseLeave={() => {
-        window.clearTimeout(hoverClearTimerRef.current);
-        onHoverProvince(null);
-        setCursor(null);
-        if (viewLevel === 'country') setHoveredAreaId(null);
-      }}
-      ref={stageRef}
-    >
-      <div className="map-hud">
-        <span><MousePointer2 size={14} aria-hidden="true" /> Hover / Click</span>
-        <strong>
-          {viewLevel === 'country'
-            ? getAreaById(theme, hoveredAreaId)?.name || '全国总览'
-            : viewLevel === 'area'
-              ? currentArea?.name || '待配置区块'
-              : formatProvinceName(selectedProvinceFeature)}
-        </strong>
-      </div>
-
-      <svg
-        aria-label={theme.labels?.countryTitle || theme.name}
-        className="map-svg"
-        height={stageSize.height}
-        role="img"
-        viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
-        width={stageSize.width}
+    <div className="map-stage" ref={mapStageRef}>
+      <ComposableMap
+        height={mapSize.height}
+        projection={projection}
+        width={mapSize.width}
       >
         <defs>
-          <clipPath id="active-map-fill">
-            {fillFeatures.map((feature) => (
-              <path d={pathGenerator(feature) || ''} key={`clip-${feature.properties.adcode}`} />
-            ))}
-          </clipPath>
-          <filter id="provinceGlow" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="0" stdDeviation="3" floodColor="#f4c95d" floodOpacity="0.75" />
-          </filter>
-        </defs>
+          {/* 全国裁切路径 */}
+          {validFeatures.length > 0 && (
+            <clipPath id="clip-china">
+              {validFeatures.map((geo) => (
+                <path d={pathGenerator(geo)} key={`clip-path-china-${geo.properties.adcode}`} />
+              ))}
+            </clipPath>
+          )}
 
-        <rect className="map-bg-grid" width={stageSize.width} height={stageSize.height} rx="18" />
+          {/* 大区裁切路径 */}
+          {currentArea && (
+            <clipPath id={`clip-area-${currentArea.id}`}>
+              {validFeatures.filter(geo => visibleAdcodes.has(String(geo.properties.adcode))).map((geo) => (
+                <path d={pathGenerator(geo)} key={`clip-path-area-${geo.properties.adcode}`} />
+              ))}
+            </clipPath>
+          )}
 
-        {showAiFill && fillSrc && imageFrame && (
-          <image
-            className="map-ai-fill"
-            clipPath="url(#active-map-fill)"
-            height={imageFrame.h}
-            href={fillSrc}
-            preserveAspectRatio="none"
-            width={imageFrame.w}
-            x={imageFrame.x}
-            y={imageFrame.y}
-          />
-        )}
-
-        <g className="province-layer" key={focusKey}>
-          {features.map((feature) => {
-            const adcode = String(feature.properties.adcode);
-            const area = provinceAreaMap.get(adcode);
-            const inCurrentArea = currentAreaAdcodes.has(adcode);
-            const inHoveredArea = viewLevel === 'country' && hoveredAreaId && area?.id === hoveredAreaId;
-            const hiddenByArea = (viewLevel === 'area' || viewLevel === 'province')
-              && currentAreaAdcodes.size > 0
-              && !inCurrentArea;
-            const selected = viewLevel !== 'country' && adcode === String(selectedProvinceAdcode);
-            const hovered = viewLevel === 'country'
-              ? Boolean(inHoveredArea)
-              : adcode === String(hoveredAdcode);
-            const d = pathGenerator(feature) || '';
-
+          {/* 省份单独裁切路径 */}
+          {validFeatures.map((geo) => {
+            const adcode = String(geo.properties.adcode);
             return (
-              <path
-                aria-label={`${formatProvinceName(feature)}${area ? `，${area.name}` : ''}`}
-                className={[
-                  'province-path',
-                  hiddenByArea ? 'is-muted' : '',
-                  inHoveredArea ? 'is-area-preview' : '',
-                  inCurrentArea && viewLevel !== 'country' ? 'is-in-area' : '',
-                  selected ? 'is-selected' : '',
-                  hovered ? 'is-hovered' : '',
-                ].join(' ')}
-                d={d}
-                data-adcode={adcode}
-                key={adcode}
-                onClick={() => selectFeature(feature)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    selectFeature(feature);
-                  }
-                }}
-                onMouseEnter={(event) => handlePointerMove(event, feature, area)}
-                onMouseLeave={clearCountryHoverWithAnimation}
-                onMouseMove={(event) => handlePointerMove(event, feature, area)}
-                role="button"
-                style={{ '--area-color': area?.color || '#64748b' }}
-                tabIndex={0}
-              />
+              <clipPath id={`clip-province-${adcode}`} key={`clip-path-province-${adcode}`}>
+                <path d={pathGenerator(geo)} />
+              </clipPath>
             );
           })}
-        </g>
+        </defs>
 
-        {isLoading && (
-          <text className="map-loading" x={stageSize.width / 2} y={stageSize.height / 2}>
-            地图加载中...
+        {mapLoading ? (
+          <text className="map-loading" x={mapSize.width / 2} y={mapSize.height / 2}>
+            宗教信仰文化地图加载中...
           </text>
-        )}
+        ) : (
+          <>
+            {/* 1. 底层负责地图底板底色及所有的 hover、点击交互和基本描边 (唯一标准的 Geographies 容器，绝不报错) */}
+            <Geographies geography={chinaGeoJson}>
+              {({ geographies }) => {
+                if (!geographies) return null;
+                return geographies
+                  .filter((geo) => geo.properties?.name && geo.properties?.adcode)
+                  .map((geo) => {
+                    const adcode = String(geo.properties.adcode);
+                    const area = provinceAreaMap.get(adcode);
+                    const isInFocusedArea = currentArea && visibleAdcodes.has(adcode);
+                    const isHidden = (viewLevel === 'area' || viewLevel === 'province') && !isInFocusedArea;
+                    const isActiveProvince = viewLevel === 'province' && String(selectedProvinceAdcode) === adcode;
+                    
+                    let defaultFill = 'var(--map-empty-fill)';
+                    let defaultFillOpacity = 1;
+                    let defaultStroke = area?.color || 'var(--map-empty-stroke)';
+                    let defaultStrokeWidth = 0.75;
+                    let defaultStrokeOpacity = 0.85;
 
-        {error && (
-          <text className="map-loading is-error" x={stageSize.width / 2} y={stageSize.height / 2}>
-            地图加载失败
-          </text>
-        )}
-      </svg>
+                    if (viewLevel === 'country' && area) {
+                      defaultFill = area.color;
+                      defaultFillOpacity = 0.74;
+                      defaultStroke = '#ffffff';
+                      defaultStrokeOpacity = 0.72;
+                      defaultStrokeWidth = 1.1;
+                    } else if (viewLevel === 'area') {
+                      if (isInFocusedArea) {
+                        defaultStroke = currentArea.color;
+                        defaultStrokeWidth = 1.5;
+                      } else {
+                        defaultFillOpacity = 0.08;
+                        defaultStrokeOpacity = 0.1;
+                      }
+                    } else if (viewLevel === 'province') {
+                      if (isActiveProvince) {
+                        defaultStroke = '#d4af37';
+                        defaultStrokeWidth = 3.0;
+                      } else if (isInFocusedArea) {
+                        defaultStroke = currentArea.color;
+                        defaultStrokeWidth = 1.0;
+                        defaultStrokeOpacity = 0.4;
+                        defaultFillOpacity = 0.18;
+                      } else {
+                        defaultFillOpacity = 0.08;
+                        defaultStrokeOpacity = 0.1;
+                      }
+                    }
 
-      {cursor && (
-        <div className="hover-card" style={{ left: cursor.x, top: cursor.y }}>
-          <strong>{viewLevel === 'country' && cursor.area ? cursor.area.name : formatProvinceName(cursor.feature)}</strong>
-          <span>
-            {viewLevel === 'country' && cursor.area
-              ? `${cursor.area.provinceAdcodes?.length || 0} 个省份 · 点击进入文化区`
-              : cursor.area?.name || `未绑定${cultureModule.label}区块`}
-          </span>
+                    return (
+                      <Geography
+                        aria-label={area ? `${geo.properties.name}，属于${area.name}` : geo.properties.name}
+                        className={`province ${isHidden ? 'is-hidden' : ''} ${viewLevel !== 'country' && isInFocusedArea ? 'is-focused' : ''} ${isActiveProvince ? 'is-active-province' : ''}`}
+                        geography={geo}
+                        key={`geo-interact-${geo.rsmKey}`}
+                        onClick={(event) => {
+                          recordFoodOrigin(event);
+                          if (viewLevel === 'country') {
+                            if (area) {
+                              onSelectArea(area.id);
+                              onViewLevelChange('area');
+                            } else {
+                              onSelectProvince(adcode);
+                              onViewLevelChange('province');
+                            }
+                          } else if (viewLevel === 'area') {
+                            if (isInFocusedArea) {
+                              onSelectProvince(adcode);
+                              onViewLevelChange('province');
+                            }
+                          }
+                        }}
+                        onFocus={() => {
+                          if (viewLevel === 'country' && area) {
+                            onHoverArea(area.id);
+                          }
+                        }}
+                        onMouseEnter={(event) => handleAreaPointer(event, area)}
+                        onMouseMove={(event) => handleAreaPointer(event, area)}
+                        role="button"
+                        style={{
+                          default: {
+                            fill: defaultFill,
+                            fillOpacity: defaultFillOpacity,
+                            outline: 'none',
+                            stroke: defaultStroke,
+                            strokeOpacity: defaultStrokeOpacity,
+                            strokeWidth: defaultStrokeWidth,
+                          },
+                          hover: {
+                            fill: 'rgba(212, 175, 55, 0.05)',
+                            fillOpacity: isHidden ? 0.08 : 0.95,
+                            outline: 'none',
+                            stroke: '#d4af37',
+                            strokeOpacity: 1,
+                            strokeWidth: 2.5,
+                          },
+                          pressed: {
+                            fill: defaultFill,
+                            outline: 'none',
+                          },
+                        }}
+                        tabIndex={0}
+                      />
+                    );
+                  });
+              }}
+            </Geographies>
+
+            {/* 2. 可选图板填充层：宗教版默认关闭，保留配置能力 */}
+            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && (
+              <image
+                className="map-fill-image map-fill-country"
+                href={getVersionedAsset(theme.chinaAsset?.src || '/assets/food/china-food-ai.png')}
+                key="country-food-map"
+                x={chinaBounds.x}
+                y={chinaBounds.y}
+                width={chinaBounds.w}
+                height={chinaBounds.h}
+                clipPath="url(#clip-china)"
+                preserveAspectRatio="none"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
+            {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
+              <image
+                className="map-fill-image map-fill-area"
+                href={getVersionedAsset(currentArea.summaryAsset?.src)}
+                key={`area-food-map-${currentArea.id}`}
+                x={areaBounds.x}
+                y={areaBounds.y}
+                width={areaBounds.w}
+                height={areaBounds.h}
+                clipPath={`url(#clip-area-${currentArea.id})`}
+                preserveAspectRatio="none"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+
+            {viewLevel === 'province' && currentArea && (
+              <>
+                {/* 2.1 大区同区其他省份半透明显示总结图背景 */}
+                {theme.useImageFills !== false && areaBounds && (
+                  <image
+                    className="map-fill-image map-fill-area is-soft"
+                    href={getVersionedAsset(currentArea.summaryAsset?.src)}
+                    key={`area-food-map-soft-${currentArea.id}`}
+                    x={areaBounds.x}
+                    y={areaBounds.y}
+                    width={areaBounds.w}
+                    height={areaBounds.h}
+                    clipPath={`url(#clip-area-${currentArea.id})`}
+                    preserveAspectRatio="none"
+                    opacity={0.18}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+                {/* 2.2 聚焦激活的省份以 100% 不透明度呈现省级图板 */}
+                {theme.useImageFills !== false && (() => {
+                  const adcode = String(selectedProvinceAdcode);
+                  const bounds = provinceBoundsMap.get(adcode);
+                  const asset = currentArea?.assets?.find(a => String(a.provinceAdcode) === adcode);
+                  if (bounds) {
+                    return (
+                      <image
+                        className="map-fill-image map-fill-province"
+                        href={getVersionedAsset(asset ? asset.src : `/assets/food/${adcode}_contour.png`)}
+                        key={`province-food-map-${adcode}`}
+                        x={bounds.x}
+                        y={bounds.y}
+                        width={bounds.w}
+                        height={bounds.h}
+                        clipPath={`url(#clip-province-${adcode})`}
+                        preserveAspectRatio="none"
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    );
+                  }
+                  return null;
+                })()}
+              </>
+            )}
+
+            <g className={`province-label-layer labels-${viewLevel}`} pointerEvents="none">
+              {provinceLabelItems.map((item) => {
+                const [offsetX, offsetY] = getProvinceLabelOffset(item.adcode, viewLevel);
+                const isInFocusedArea = currentArea && visibleAdcodes.has(item.adcode);
+                const isActiveProvince = viewLevel === 'province' && String(selectedProvinceAdcode) === item.adcode;
+                const shouldShow = viewLevel === 'country'
+                  || (viewLevel === 'area' && isInFocusedArea)
+                  || (viewLevel === 'province' && (isInFocusedArea || isActiveProvince));
+                if (!shouldShow) return null;
+                return (
+                  <g
+                    className={`province-label ${item.area ? 'has-area' : 'is-muted'} ${item.isTiny ? 'is-tiny' : ''} ${isActiveProvince ? 'is-active' : ''}`}
+                    key={`province-label-${item.adcode}`}
+                    style={{ '--province-color': item.area?.color || '#64748b' }}
+                    transform={`translate(${Math.round(item.x + offsetX)} ${Math.round(item.y + offsetY)})`}
+                  >
+                    <text className="province-label-text" textAnchor="middle">
+                      {item.shortName}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          </>
+        )}
+      </ComposableMap>
+
+      {viewLevel !== 'country' && activeFoodArea && foodLayoutItems.length > 0 && (
+        <div className={`food-orbit-layer ${isFoodLayerReady ? 'is-ready' : ''}`} aria-label={`${activeFoodArea.name}文化线索`}>
+          {foodLayoutItems.map((item) => {
+            const isSelected = selectedFoodItem?.id === item.id && selectedFoodItem?.areaId === activeFoodArea.id;
+            return (
+              <button
+                aria-label={`查看${item.name}文化线索`}
+                aria-pressed={isSelected}
+                className={`food-float-item ${isSelected ? 'is-selected' : ''}`}
+                key={`${foodLayerKey}-${item.id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  recordFoodOrigin(event);
+                  onFoodItemSelect(item, activeFoodArea.id);
+                }}
+                style={{
+                  '--food-accent': item.accent || activeFoodArea.color,
+                  '--food-delay': `${item.delay}ms`,
+                  '--food-rotate': `${item.rotate}deg`,
+                  '--food-size': `${item.size}px`,
+                  '--from-x': `${foodBurstOrigin.x}px`,
+                  '--from-y': `${foodBurstOrigin.y}px`,
+                  '--to-x': `${item.x}px`,
+                  '--to-y': `${item.y}px`,
+                }}
+                title={item.name}
+                type="button"
+              >
+              <span className="food-float-content">
+                  <span className="culture-symbol" aria-hidden="true">{item.symbol || item.name.slice(0, 1)}</span>
+                  <span className="food-float-label">{item.name}</span>
+                </span>
+                <span className="food-float-ghost" aria-hidden="true">
+                  <span className="culture-symbol">{item.symbol || item.name.slice(0, 1)}</span>
+                  <span className="food-float-label">{item.name}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {showFoodPins && (
-        pinLayersWithLayouts.map((layer) => (
-          <CultureMapPins
-            assetVersions={assetVersions}
-            cultureModule={cultureModule}
-            itemLayouts={layer.itemLayouts}
-            key={layer.id}
-            layerPhase={layer.phase}
-            onLayerMouseEnter={layer.mode === 'preview' ? () => window.clearTimeout(hoverClearTimerRef.current) : undefined}
-            onLayerMouseLeave={layer.mode === 'preview' ? clearCountryHoverWithAnimation : undefined}
-            onSelectFood={onSelectFood}
-            selectedFood={selectedFood}
-            stageSize={stageSize}
-          />
-        ))
-      )}
-    </section>
+      {/* 底部悬浮的传统文化区图例 */}
+      <div className="map-legend">
+        {theme.areas.map((area) => (
+          <button
+            className={area.id === currentArea.id ? 'is-active' : ''}
+            key={area.id}
+            onClick={() => onSelectArea(area.id)}
+            style={area.id === currentArea.id ? { color: area.color, borderColor: area.color } : {}}
+            type="button"
+          >
+            <i style={{ background: area.color, color: area.color }} />
+            <span>{area.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
-function DetailPanel({
-  activeAsset,
-  assetVersions,
-  cultureModule,
-  currentArea,
-  onBackArea,
-  onBackCountry,
-  selectedFood,
-  selectedProvinceName,
-  showFoodPins,
-  toggleFoodPins,
-  theme,
-  viewLevel,
-}) {
-  const [quizChoice, setQuizChoice] = useState(null);
+/**
+ * 独创：运行模式下的趣味问答通关小游戏及人文摘要组件
+ */
+function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProvinceAdcode, viewLevel, onBackCountry, onBackArea, onSelectArea, theme }) {
+  // 分数统计及答题闯关状态
+  const [score, setScore] = useState(0);
+  const [answeredMap, setAnsweredMap] = useState({}); // 保存每个省份/大区的答题记录
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [isAnswered, setIsAnswered] = useState(false);
 
+  // 寻找当前选中的省级文化资产
+  const activeAsset = useMemo(() => {
+    if (!currentArea || !currentArea.assets) return null;
+    return currentArea.assets.find(a => String(a.provinceAdcode) === String(selectedProvinceAdcode));
+  }, [currentArea, selectedProvinceAdcode]);
+
+  // 根据当前是在大区视图还是省份视图，动态加载对应的 quiz
+  const quiz = useMemo(() => {
+    if (viewLevel === 'province' && activeAsset?.quiz) {
+      return activeAsset.quiz;
+    }
+    if (viewLevel === 'area' && currentArea?.quiz) {
+      return currentArea.quiz;
+    }
+    return null;
+  }, [viewLevel, activeAsset, currentArea]);
+
+  // 生成唯一的答题 key（让每一个省份都拥有独立的答题机制，且答对得分可累计！）
+  const quizKey = useMemo(() => {
+    if (viewLevel === 'province' && selectedProvinceAdcode) {
+      return `${currentArea?.id || 'independent'}-${selectedProvinceAdcode}`;
+    }
+    if (viewLevel === 'area' && currentArea) {
+      return currentArea.id;
+    }
+    return 'country';
+  }, [viewLevel, currentArea, selectedProvinceAdcode]);
+
+  // 切换省份或大区时，重置当前这道题的选择状态
   useEffect(() => {
-    setQuizChoice(null);
-  }, [selectedFood?.id]);
+    setSelectedOption(null);
+    setIsAnswered(false);
+  }, [quizKey]);
 
-  const selectedQuiz = selectedFood?.quiz;
-  const currentItems = useMemo(
-    () => normalizeCultureItems(currentArea, cultureModule),
-    [currentArea, cultureModule],
-  );
-  const hasCultureAreas = Boolean(theme.areas?.length);
-  const showEmptyState = !selectedFood && (!hasCultureAreas || !currentItems.length);
+  const isCurrentCorrect = answeredMap[quizKey] === 'correct';
+
+  function versionedImage(src) {
+    const cleanSrc = String(src || '').split('?')[0];
+    const version = assetVersions[cleanSrc];
+    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+  }
+
+  function handleOptionClick(index) {
+    if (isAnswered || isCurrentCorrect || !quiz) return;
+
+    setSelectedOption(index);
+    setIsAnswered(true);
+
+    if (index === quiz.answerIndex) {
+      setScore((prev) => prev + 20);
+      setAnsweredMap((prev) => ({ ...prev, [quizKey]: 'correct' }));
+    } else {
+      setAnsweredMap((prev) => ({ ...prev, [quizKey]: 'wrong' }));
+    }
+  }
+
+  function handleRetry() {
+    setSelectedOption(null);
+    setIsAnswered(false);
+    setAnsweredMap((prev) => ({ ...prev, [quizKey]: null }));
+  }
 
   return (
-    <aside className="panel detail-panel">
-      <div className="panel-kicker">
-        <Layers size={16} aria-hidden="true" />
-        <span>{cultureModule.label}</span>
-      </div>
-
-      <div className="focus-title">
-        <span>{viewLevel === 'country' ? '全国视图' : viewLevel === 'area' ? '大区视图' : '省份视图'}</span>
-        <h2>
-          {viewLevel === 'country'
-            ? theme.labels?.sidebarTitle || theme.name
+    <aside className="side-card run-card">
+      <div className="card-kicker">
+        <Landmark size={16} aria-hidden="true" />
+        <span>
+          {viewLevel === 'province'
+            ? '省级信仰线索'
             : viewLevel === 'area'
-              ? currentArea?.name
-              : selectedProvinceName || activeAsset?.title || '省份区块'}
-        </h2>
+            ? '信仰文化区详情'
+            : '中国宗教信仰版图'}
+        </span>
       </div>
-
-      <p className="panel-copy">
-        {!hasCultureAreas
-          ? theme.labels?.emptyState || '暂无文化区块配置。'
-          : viewLevel === 'country'
-            ? `点击任意省份进入对应文化区块；悬停时地图会高亮省份并切换${cultureModule.itemNoun}点位。`
-          : viewLevel === 'area'
-            ? currentArea?.description
-            : `当前展示 ${activeAsset?.title || selectedProvinceName || '省份'} 的地图区块，可继续点击${cultureModule.itemNoun}查看题目与做法。`}
+      
+      <h2 style={{ borderLeftColor: (viewLevel !== 'country' && currentArea) ? currentArea.color : '#d4af37' }}>
+        {viewLevel === 'province' && activeAsset
+          ? `${currentArea ? currentArea.name : '独立省份'} · ${activeAsset.title.replace('图', '')}`
+          : (viewLevel === 'area' && currentArea)
+          ? currentArea.name
+          : theme.name}
+      </h2>
+      <p>
+        {viewLevel === 'province' && activeAsset
+          ? (activeAsset.quiz?.question ? `这里展示${activeAsset.title.replace('图', '')}，用于理解该省份在当前信仰区中的文化线索与代表性场景。` : '探索省级信仰文化线索。')
+          : (viewLevel === 'area' && currentArea)
+          ? currentArea.description
+          : theme.description}
       </p>
 
-      <div className="action-grid">
-        {viewLevel !== 'country' && (
-          <button onClick={onBackCountry} type="button">
-            <ArrowLeft size={15} aria-hidden="true" />
-            全国
-          </button>
+      {viewLevel !== 'country' && currentArea?.summaryAsset?.src && (
+        <figure className="region-board-preview">
+          <img
+            alt={`${currentArea.name}图板预览`}
+            src={versionedImage(currentArea.summaryAsset.src)}
+          />
+          <figcaption>{currentArea.summaryAsset.title}</figcaption>
+        </figure>
+      )}
+      
+      <div className="metric-row">
+        {viewLevel === 'country' ? (
+          <>
+            <span style={{ color: '#d4af37', borderColor: '#d4af3740', background: '#d4af3710' }}>
+              {theme.areas.length} 个信仰文化区
+            </span>
+            <span>
+              {theme.areas.reduce((acc, a) => acc + (a.assets?.length || 0), 0)} 条省级线索
+            </span>
+          </>
+        ) : (
+          <>
+            <span style={{ color: currentArea?.color, borderColor: `${currentArea?.color}40`, background: `${currentArea?.color}10` }}>
+              {currentArea?.provinceAdcodes.length} 个省级行政区
+            </span>
+            <span>{currentArea?.assets?.length || 0} 条省级线索</span>
+          </>
         )}
-        {viewLevel === 'province' && (
-          <button onClick={onBackArea} type="button">
-            <ChevronRight size={15} aria-hidden="true" />
-            大区
-          </button>
-        )}
-        <button onClick={toggleFoodPins} type="button">
-          {showFoodPins ? <Eye size={15} aria-hidden="true" /> : <EyeOff size={15} aria-hidden="true" />}
-          {cultureModule.itemNoun}
-        </button>
       </div>
 
-      {showEmptyState && (
-        <section className="empty-culture-state">
-          <strong>{theme.labels?.emptyState || `暂无${cultureModule.label}内容`}</strong>
-          <span>{cultureModule.itemNoun}未配置 · {cultureModule.processTitle}待填充 · {cultureModule.quizTitle}待填充</span>
+      {viewLevel === 'country' && (
+        <div className="area-overview-list">
+          {theme.areas.map((area) => (
+            <button
+              key={area.id}
+              onClick={() => onSelectArea(area.id)}
+              style={{ '--area-color': area.color }}
+              type="button"
+            >
+              <i />
+              <span>{area.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {viewLevel !== 'country' && selectedFoodItem && (
+        <section
+          className="food-process-card"
+          key={`${selectedFoodItem.areaId}-${selectedFoodItem.id}`}
+          style={{ '--food-accent': selectedFoodItem.accent || currentArea?.color || '#d4af37' }}
+        >
+          <div className="food-process-head">
+            <div className="culture-symbol process-symbol" aria-hidden="true">
+              {selectedFoodItem.symbol || selectedFoodItem.name.slice(0, 1)}
+            </div>
+            <div>
+              <span>{selectedFoodItem.areaName || currentArea?.name}</span>
+              <strong>{selectedFoodItem.name}</strong>
+            </div>
+          </div>
+          <div className="process-sketch-grid">
+            {selectedFoodItem.process.map((step, index) => (
+              <article className="process-sketch-step" key={`${selectedFoodItem.id}-step-${index}`}>
+                <div className="sketch-icon" aria-hidden="true">
+                  <i />
+                  <b>{index + 1}</b>
+                </div>
+                <p>{step}</p>
+              </article>
+            ))}
+          </div>
         </section>
       )}
 
-      {selectedFood && (
-        <section className="selected-culture-item">
-          <figure className="selected-item-hero">
-            <img
-              alt={`${selectedFood.name}大图`}
-              src={withVersion(selectedFood.image, assetVersions)}
-              style={{ objectPosition: selectedFood.objectPosition || '50% 50%' }}
-            />
-            <figcaption>{selectedFood.name}</figcaption>
-          </figure>
-
-          <div className="selected-item-head">
-            <img
-              alt={selectedFood.name}
-              src={withVersion(selectedFood.image, assetVersions)}
-              style={{ objectPosition: selectedFood.objectPosition || '50% 50%' }}
-            />
-            <div>
-              <span>{selectedFood.areaName}</span>
-              <h3>{selectedFood.name}</h3>
+      {/* 趣味知识问答板块 */}
+      {viewLevel !== 'country' && quiz && (
+        <div className="game-container">
+          <div className="game-title">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <HelpCircle size={15} style={{ color: '#d4af37' }} />
+              <span>
+                {viewLevel === 'province' && activeAsset ? `${activeAsset.title.substring(0, 3)}·线索问答` : '信仰区知识问答'}
+              </span>
+            </div>
+            <div className="score-badge">
+              <Trophy size={12} />
+              <span>得分: {score}</span>
             </div>
           </div>
 
-          <section className="food-process">
-            <div>
-              <span>{cultureModule.processTitle}</span>
-            </div>
-            <ol>
-              {selectedFood.process.map((step, index) => (
-                <li key={`${selectedFood.id}-${index}`}>
-                  <b>{index + 1}</b>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-          </section>
-
-          {selectedQuiz && (
-            <section className="culture-quiz">
-              <span>{cultureModule.quizTitle}</span>
-              <h3>{selectedQuiz.question}</h3>
-              <div className="quiz-options">
-                {(selectedQuiz.options || []).map((option, index) => {
-                  const answered = quizChoice !== null;
-                  const correct = index === selectedQuiz.answerIndex;
-                  const chosen = quizChoice === index;
-                  return (
-                    <button
-                      className={[
-                        answered && correct ? 'is-correct' : '',
-                        answered && chosen && !correct ? 'is-wrong' : '',
-                      ].join(' ')}
-                      key={`${selectedFood.id}-quiz-${option}`}
-                      onClick={() => setQuizChoice(index)}
-                      type="button"
-                    >
-                      {option}
-                    </button>
-                  );
-                })}
+          <div className="quiz-box">
+            {isCurrentCorrect ? (
+              <div className="game-reward">
+                <Award size={36} style={{ color: '#d4af37', margin: '0 auto 8px', display: 'block' }} />
+                <p style={{ fontWeight: 'bold', color: '#fff' }}>恭喜通关！答题正确 🎯</p>
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>
+                  {quiz.successReward}
+                </p>
               </div>
-              {quizChoice !== null && (
-                <p>{quizChoice === selectedQuiz.answerIndex ? selectedQuiz.successReward : `参考答案：${selectedQuiz.options?.[selectedQuiz.answerIndex] || '请查看配置'}`}</p>
-              )}
-            </section>
-          )}
-        </section>
+            ) : (
+              <div>
+                <p className="quiz-question">{quiz.question}</p>
+                <div className="quiz-options">
+                  {quiz.options.map((option, idx) => {
+                    const isSelected = selectedOption === idx;
+                    const isCorrectOption = idx === quiz.answerIndex;
+                    let btnClass = '';
+                    
+                    if (isAnswered) {
+                      if (isCorrectOption) {
+                        btnClass = 'is-correct';
+                      } else if (isSelected) {
+                        btnClass = 'is-wrong';
+                      }
+                    }
+
+                    return (
+                      <button
+                        className={`quiz-option-btn ${btnClass}`}
+                        key={idx}
+                        onClick={() => handleOptionClick(idx)}
+                        type="button"
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {isAnswered && !isCurrentCorrect && (
+                  <div style={{ marginTop: '10px', textAlign: 'center' }}>
+                    <button className="secondary-action btn-reset" onClick={handleRetry} type="button">
+                      重新挑战 🔄
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
-      <div className="layer-state">
-        <span>AI 轮廓图层 OFF</span>
-        <span className={showFoodPins ? 'is-on' : ''}>{cultureModule.itemNoun} {showFoodPins ? 'ON' : 'OFF'}</span>
+      <div className="run-card-actions" style={{ marginTop: 'auto', display: 'flex', gap: '8px', flexDirection: 'column' }}>
+        {viewLevel === 'province' && (
+          <>
+            {currentArea && (
+              <button className="secondary-action" onClick={onBackArea} type="button" style={{ width: '100%' }}>
+                <ArrowLeft size={16} aria-hidden="true" />
+                返回大区详情
+              </button>
+            )}
+            <button className="secondary-action" onClick={onBackCountry} type="button" style={{ width: '100%' }}>
+              <ArrowLeft size={16} aria-hidden="true" />
+              返回全国版图
+            </button>
+          </>
+        )}
+        {viewLevel === 'area' && (
+          <button className="secondary-action" onClick={onBackCountry} type="button" style={{ width: '100%' }}>
+            <ArrowLeft size={16} aria-hidden="true" />
+            返回全国版图
+          </button>
+        )}
       </div>
     </aside>
   );
 }
 
-function App() {
-  const theme = useFoodMapStore((state) => state.theme);
-  const activeThemeId = useFoodMapStore((state) => state.activeThemeId);
-  const resetTheme = useFoodMapStore((state) => state.resetTheme);
-  const setThemeById = useFoodMapStore((state) => state.setThemeById);
-  const cultureModule = useMemo(() => getCultureModule(theme), [theme]);
-  const [viewLevel, setViewLevel] = useState('country');
-  const [selectedAreaId, setSelectedAreaId] = useState(DEFAULT_AREA_ID);
-  const [hoveredAreaId, setHoveredAreaId] = useState(null);
-  const [selectedProvinceAdcode, setSelectedProvinceAdcode] = useState(null);
-  const [selectedProvinceLabel, setSelectedProvinceLabel] = useState('');
-  const [hoveredAdcode, setHoveredAdcode] = useState(null);
-  const [selectedFood, setSelectedFood] = useState(null);
-  const showAiFill = theme.features?.aiRegionFill === true && cultureModule.features.aiRegionFill === true;
-  const [showFoodPins, setShowFoodPins] = useState(true);
-  const [notice, setNotice] = useState('地图已切到小图点位模式：AI 轮廓图层暂时关闭。');
-  const assetVersions = useMemo(() => ({}), []);
-  const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
-  const currentArea = getAreaById(theme, selectedAreaId);
+/**
+ * AI 灵感生成舱：开发模式下步骤式引导评委和开发者接入 MCP 协议与 AI 交互控制台
+ */
+function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, onFlowStep, onSelectArea, onToolResult, theme }) {
+  const [prompt, setPrompt] = useState('');
+  const [assetPrompt, setAssetPrompt] = useState('');
+  const [selectedAssetId, setSelectedAssetId] = useState('');
+  const attachImageAsset = useFoodMapStore((state) => state.attachImageAsset);
+  const updateAreaConfig = useFoodMapStore((state) => state.updateAreaConfig);
 
-  const selectedProvinceName = useMemo(() => {
-    if (!selectedProvinceAdcode) return '';
-    const area = provinceAreaMap.get(String(selectedProvinceAdcode));
-    const asset = area?.assets?.find((item) => String(item.provinceAdcode) === String(selectedProvinceAdcode));
-    return asset?.title || selectedProvinceLabel || selectedProvinceAdcode;
-  }, [provinceAreaMap, selectedProvinceAdcode, selectedProvinceLabel]);
+  // 借助 React Query 查询当前暴露的 MCP 工具列表
+  const { data: tools, isLoading: toolsLoading } = useQuery({
+    queryFn: getMcpTools,
+    queryKey: ['mcp-tools'],
+    retry: 1,
+  });
 
-  const activeMapAsset = getAssetForView(theme, viewLevel, currentArea, selectedProvinceAdcode);
+  const { data: imageAssetData, isLoading: assetsLoading, refetch: refetchImageAssets } = useQuery({
+    queryFn: getImageAssets,
+    queryKey: ['image-assets'],
+    retry: 1,
+  });
+
+  // 调用 MCP 工具的 Mutation 过程
+  const mcpMutation = useMutation({
+    mutationFn: runMcpTool,
+    onError: (error) => onToolResult(error.message),
+  });
+
+  const savePromptMutation = useMutation({
+    mutationFn: saveImageAssetPrompt,
+    onError: (error) => onToolResult(error.message),
+    onSuccess: () => {
+      refetchImageAssets();
+      onToolResult('图片资产 Prompt 已保存');
+    },
+  });
+
+  const regenerateMutation = useMutation({
+    mutationFn: regenerateImageAsset,
+    onError: (error) => onToolResult(error.message),
+    onSuccess: (result) => {
+      refetchImageAssets();
+      onAssetRegenerated(result.asset, result.cacheBust);
+      onToolResult(`重新生成完成：${result.asset.title}`);
+    },
+  });
+
+  const form = useForm({
+    defaultValues: {
+      areaId: currentArea.id,
+      height: FOOD_IMAGE_ASSET.size.height,
+      lat: FOOD_IMAGE_ASSET.coordinates[1],
+      lng: FOOD_IMAGE_ASSET.coordinates[0],
+      style: '精美中国风，传统古典配色，国风科技插画，写实细腻',
+      width: FOOD_IMAGE_ASSET.size.width,
+    },
+    resolver: zodResolver(mcpFormSchema),
+  });
+
+  // 监听当前所选文化区，智能重置表单为该文化区的数据坐标
+  useEffect(() => {
+    form.reset({
+      areaId: currentArea.id,
+      height: currentArea.assets[0]?.size.height || FOOD_IMAGE_ASSET.size.height,
+      lat: currentArea.assets[0]?.coordinates[1] || currentArea.center[1],
+      lng: currentArea.assets[0]?.coordinates[0] || currentArea.center[0],
+      style: '精美中国风，传统古典配色，国风科技插画，写实细腻',
+      width: currentArea.assets[0]?.size.width || FOOD_IMAGE_ASSET.size.width,
+    });
+  }, [currentArea, form]);
+
+  // 调用 MCP：生成 AI 绘图提示词
+  async function generatePrompt(values) {
+    const result = await mcpMutation.mutateAsync({
+      params: {
+        areaId: values.areaId,
+        areaName: getAreaById(theme, values.areaId).name,
+        description: getAreaById(theme, values.areaId).description,
+        style: values.style,
+      },
+      tool: 'food.generatePrompt',
+    });
+    setPrompt(result.prompt);
+    onFlowStep('prompt');
+    onToolResult('AI 灵感舱成功编译：文化图板 Prompt 已就绪');
+  }
+
+  // 调用 MCP：将图片素材一键附着绑定到指定的经纬度上
+  async function attachImage(values) {
+    const area = getAreaById(theme, values.areaId);
+    const result = await mcpMutation.mutateAsync({
+      params: {
+        areaId: values.areaId,
+        coordinates: [values.lng, values.lat],
+        size: { height: values.height, width: values.width },
+        src: FOOD_IMAGE_ASSET.src,
+        title: `${area.name} AI 灵感图`,
+      },
+      tool: 'food.attachImageAsset',
+    });
+    attachImageAsset(values.areaId, result.asset);
+    updateAreaConfig(values.areaId, { center: [values.lng, values.lat] });
+    onSelectArea(values.areaId);
+    onFlowStep('asset');
+    onToolResult('AI 绑定成功：图片资产已挂载至指定地理经纬度');
+  }
+
+  // 调用 MCP：一键将当前的配置持久化写入到 Node.js 后端的本地 JSON
+  async function saveConfig() {
+    await mcpMutation.mutateAsync({
+      params: { theme },
+      tool: 'food.saveConfig',
+    });
+    onFlowStep('save');
+    onToolResult('配置持久化成功：地图配置文件已安全存档至本地');
+  }
+
+  // 调用 MCP：一键导出 JSON 配置并拷贝至系统剪贴板
+  async function exportConfig() {
+    const result = await mcpMutation.mutateAsync({
+      params: { themeId: theme.id },
+      tool: 'food.exportConfig',
+    });
+    await navigator.clipboard?.writeText(result.configText);
+    onToolResult('导出成功：地图 JSON 配置数据已安全拷贝至剪贴板');
+  }
+
+  const watchedAreaId = form.watch('areaId');
+  const imageAssets = imageAssetData?.assets || [];
+  const selectedImageAsset = imageAssets.find((asset) => asset.id === selectedAssetId) || imageAssets[0];
+  const assetBusy = savePromptMutation.isPending || regenerateMutation.isPending;
+
+  function versionedAsset(src) {
+    const cleanSrc = String(src || '').split('?')[0];
+    const version = assetVersions[cleanSrc];
+    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+  }
 
   useEffect(() => {
-    document.documentElement.className = 'app-document';
-    document.body.className = 'app-document';
-  }, []);
-
-  function resetViewForTheme(nextTheme, message) {
-    const nextAreaId = getDefaultAreaId(nextTheme);
-    setSelectedAreaId(nextAreaId);
-    setHoveredAreaId(null);
-    setSelectedProvinceAdcode(null);
-    setSelectedProvinceLabel('');
-    setHoveredAdcode(null);
-    setSelectedFood(null);
-    setViewLevel('country');
-    setNotice(message);
-  }
-
-  function switchCultureTheme(themeId) {
-    const nextTheme = getThemeById(themeId);
-    setThemeById(nextTheme.id);
-    resetViewForTheme(nextTheme, `已切换到 ${nextTheme.name}。`);
-  }
-
-  function selectArea(areaId) {
-    const area = getAreaById(theme, areaId);
-    if (!area) {
-      setNotice(`${theme.name} 暂无可进入的大区配置。`);
-      return;
+    if (!imageAssets.length) return;
+    const currentAreaAsset = imageAssets.find((asset) => asset.id === `area:${currentArea.id}`);
+    const nextAsset = currentAreaAsset || imageAssets[0];
+    if (!selectedAssetId) {
+      setSelectedAssetId(nextAsset.id);
     }
-    setSelectedAreaId(area.id);
-    setHoveredAreaId(null);
-    setSelectedProvinceAdcode(null);
-    setSelectedProvinceLabel('');
-    setSelectedFood(null);
-    setViewLevel('area');
-    setNotice(`已进入 ${area.name}，可点击省份或${cultureModule.itemNoun}继续查看。`);
-  }
+  }, [currentArea.id, imageAssets, selectedAssetId]);
 
-  function selectProvince(adcode, provinceName = '') {
-    const nextAdcode = String(adcode);
-    if (String(selectedProvinceAdcode) === nextAdcode) {
-      setSelectedProvinceAdcode(null);
-      setSelectedProvinceLabel('');
-      setViewLevel('area');
-      setNotice(`已取消省份筛选：${provinceName || nextAdcode}。`);
-      return;
+  useEffect(() => {
+    if (selectedImageAsset) {
+      setAssetPrompt(selectedImageAsset.prompt || '');
     }
-
-    const area = provinceAreaMap.get(String(adcode));
-    if (area) {
-      setSelectedAreaId(area.id);
-      setHoveredAreaId(null);
-    }
-    setSelectedProvinceAdcode(nextAdcode);
-    setSelectedProvinceLabel(provinceName);
-    setViewLevel('province');
-    setNotice(`已进入省份区块：${provinceName || nextAdcode}。`);
-  }
-
-  function selectFood(food) {
-    setSelectedFood(food);
-    if (food.areaId) {
-      setSelectedAreaId(food.areaId);
-      setHoveredAreaId(null);
-    }
-    setNotice(`已选中${cultureModule.itemNoun}：${food.name}。`);
-  }
-
-  function backCountry() {
-    setViewLevel('country');
-    setSelectedProvinceAdcode(null);
-    setSelectedProvinceLabel('');
-    setHoveredAreaId(null);
-    setSelectedFood(null);
-    setNotice('已返回全国交互地图。');
-  }
-
-  function backArea() {
-    if (!currentArea) {
-      backCountry();
-      setNotice(`${theme.name} 暂无大区配置。`);
-      return;
-    }
-    setViewLevel('area');
-    setSelectedProvinceAdcode(null);
-    setSelectedProvinceLabel('');
-    setHoveredAreaId(null);
-    setSelectedFood(null);
-    setNotice(`已返回 ${currentArea.name}。`);
-  }
+  }, [selectedImageAsset]);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <button className="brand" onClick={backCountry} type="button">
-          <MapPin size={20} aria-hidden="true" />
-          <span>{theme.name}</span>
-        </button>
-        <div className="culture-tabs" aria-label="文化地图类型">
-          {CULTURE_THEMES.map((cultureTheme) => {
-            const selected = (activeThemeId || theme.id) === cultureTheme.id;
-            return (
+    <aside className="side-card mcp-panel">
+      <div className="card-kicker">
+        <Bot size={16} aria-hidden="true" />
+        <span>AI 灵感生成舱控制台</span>
+      </div>
+
+      {/* 科技感引导步骤条 */}
+      <div className="stepper" aria-label="生成舱步骤">
+        {FLOW_STEPS.map((step) => (
+          <button
+            className={flowStep === step.id ? 'is-active' : ''}
+            key={step.id}
+            onClick={() => onFlowStep(step.id)}
+            type="button"
+          >
+            {step.label}
+          </button>
+        ))}
+      </div>
+
+      <form className="mcp-form" onSubmit={form.handleSubmit(generatePrompt)}>
+        <label>
+          <span>1. 目标信仰文化区</span>
+          <select
+            {...form.register('areaId')}
+            onChange={(event) => {
+              form.setValue('areaId', event.target.value);
+              onSelectArea(event.target.value);
+            }}
+            value={watchedAreaId}
+          >
+            {theme.areas.map((area) => (
+              <option key={area.id} value={area.id}>{area.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="wide">
+          <span>2. 绘图意境与艺术风格</span>
+          <select
+            {...form.register('style')}
+            onChange={(e) => form.setValue('style', e.target.value)}
+          >
+            <option value="精美中国风，传统古典配色，国风科技插画，写实细腻">科技国风 ✦</option>
+            <option value="水墨丹青，意境深远，虚实相生，中国传统水墨画">水墨丹青 ❀</option>
+            <option value="青花瓷质感，蓝白相间，古典瓷器釉色，清雅秀丽">青花瓷釉 ❈</option>
+            <option value="经典像素艺术，复古红白机游戏风格，8-bit，精致像素颗粒">复古像素 🕹️</option>
+          </select>
+        </label>
+        <div className="coordinate-grid">
+          <label>
+            <span>落点经度</span>
+            <input step="0.1" type="number" {...form.register('lng')} />
+          </label>
+          <label>
+            <span>落点纬度</span>
+            <input step="0.1" type="number" {...form.register('lat')} />
+          </label>
+          <label>
+            <span>卡片宽度 (px)</span>
+            <input type="number" {...form.register('width')} />
+          </label>
+          <label>
+            <span>卡片高度 (px)</span>
+            <input type="number" {...form.register('height')} />
+          </label>
+        </div>
+
+        {/* 核心操作按钮 */}
+        <div className="mcp-actions">
+          <button disabled={mcpMutation.isPending} type="submit">
+            <Sparkles size={14} aria-hidden="true" />
+            生成 Prompt
+          </button>
+          <button className="btn-bind" disabled={mcpMutation.isPending} onClick={form.handleSubmit(attachImage)} type="button">
+            <ImageIcon size={14} aria-hidden="true" />
+            绑定图片
+          </button>
+          <button className="btn-save" disabled={mcpMutation.isPending} onClick={saveConfig} type="button">
+            <Save size={14} aria-hidden="true" />
+            保存配置
+          </button>
+        </div>
+      </form>
+
+      {/* 桥接状态监控 */}
+      <div className="mcp-status">
+        <span>{toolsLoading ? '探测后台 API 隧道...' : `发现 ${tools?.tools?.length || 0} 个活动 AI MCP 通道`}</span>
+        {mcpMutation.isPending && <Loader2 className="spin" size={14} aria-hidden="true" />}
+      </div>
+
+      {/* 生成的 Prompt 或已有图片资产路径展示 */}
+      <div className="prompt-box">
+        <strong>{prompt ? '编译生成的 AI 图板提示词' : '当前地图图片资产'}</strong>
+        <p>{prompt || FOOD_IMAGE_ASSET.src}</p>
+      </div>
+
+      <button className="secondary-action btn-export" onClick={exportConfig} type="button">
+        <PanelRightOpen size={14} aria-hidden="true" />
+        导出配置数据并复制
+      </button>
+
+      <section className="asset-regenerator">
+        <div className="card-kicker">
+          <ImageIcon size={15} aria-hidden="true" />
+          <span>轮廓生图资产库</span>
+        </div>
+
+        <label>
+          <span>选择要重新生成的图片</span>
+          <select
+            disabled={assetsLoading || assetBusy}
+            onChange={(event) => setSelectedAssetId(event.target.value)}
+            value={selectedImageAsset?.id || ''}
+          >
+            {imageAssets.map((asset) => (
+              <option key={asset.id} value={asset.id}>
+                {asset.kind === 'country' ? '全国' : asset.kind === 'area' ? '大区' : '省份'} · {asset.title}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {selectedImageAsset && (
+          <>
+            <div className="asset-preview-grid">
+              <figure>
+                <img alt={`${selectedImageAsset.title} 输入轮廓`} src={selectedImageAsset.inputImage} />
+                <figcaption>输入轮廓</figcaption>
+              </figure>
+              <figure>
+                <img alt={`${selectedImageAsset.title} 当前输出`} src={versionedAsset(selectedImageAsset.outputImage)} />
+                <figcaption>当前输出</figcaption>
+              </figure>
+            </div>
+
+            <label>
+              <span>图片生成 Prompt</span>
+              <textarea
+                disabled={assetBusy}
+                onChange={(event) => setAssetPrompt(event.target.value)}
+                rows={8}
+                value={assetPrompt}
+              />
+            </label>
+
+            <div className="asset-meta">
+              <span>{selectedImageAsset.model}</span>
+              <span>{selectedImageAsset.size}</span>
+              <span>{selectedImageAsset.quality}</span>
+            </div>
+
+            <div className="asset-actions">
               <button
-                className={selected ? 'is-active' : ''}
-                key={cultureTheme.id}
-                onClick={() => switchCultureTheme(cultureTheme.id)}
+                disabled={assetBusy || !assetPrompt.trim()}
+                onClick={() => savePromptMutation.mutate({ assetId: selectedImageAsset.id, prompt: assetPrompt })}
                 type="button"
               >
-                {cultureTheme.moduleId === 'clothing' && <Shirt size={14} aria-hidden="true" />}
-                {cultureTheme.moduleId !== 'clothing' && <Layers size={14} aria-hidden="true" />}
-                {cultureTheme.moduleId === 'clothing' ? '服装' : '美食'}
+                <Save size={14} aria-hidden="true" />
+                保存词
               </button>
-            );
-          })}
-        </div>
-        <div className="topbar-meta">
-          <span>{viewLevel === 'country' ? '全国' : viewLevel === 'area' ? currentArea?.name || '待配置' : selectedProvinceName}</span>
-          <b>{theme.labels?.topbarMeta || cultureModule.label}</b>
-        </div>
-        <button
-          className="ghost-button"
-          onClick={() => {
-            const resetTarget = getThemeById(activeThemeId || theme.id);
-            resetTheme();
-            resetViewForTheme(resetTarget, `已重置 ${resetTarget.name}。`);
-          }}
-          type="button"
-        >
-          <RefreshCw size={15} aria-hidden="true" />
-          重置
+              <button
+                className="btn-regenerate"
+                disabled={assetBusy || !assetPrompt.trim()}
+                onClick={() => regenerateMutation.mutate({ assetId: selectedImageAsset.id, prompt: assetPrompt })}
+                type="button"
+              >
+                {regenerateMutation.isPending ? <Loader2 className="spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
+                重新生成
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </aside>
+  );
+}
+
+/**
+ * 宗教信仰文化交互地图大盘——React 核心主入口组件
+ */
+function App() {
+  const [notice, setNotice] = useState('宗教信仰文化地图已就绪，等待探索');
+  const [assetVersions, setAssetVersions] = useState({});
+  const [siteTheme, setSiteTheme] = useState('dark-ink'); // 全局视觉主题：见 SITE_THEME_OPTIONS
+  const [hoveredAreaId, setHoveredAreaId] = useState('north-ancestor-ritual');
+  const [selectedFoodItem, setSelectedFoodItem] = useState(null);
+  const [selectedProvinceAdcode, setSelectedProvinceAdcode] = useState(null); // 省级行政区下钻状态
+  const [viewLevel, setViewLevel] = useState('country'); // 三级下钻层级：'country', 'area', 'province'
+  const theme = useFoodMapStore((state) => state.theme);
+  const resetTheme = useFoodMapStore((state) => state.resetTheme);
+  const [snapshot, send] = useMachine(mapMachine);
+  const { appMode, flowStep, selectedAreaId } = snapshot.context;
+  const currentArea = getAreaById(theme, selectedAreaId);
+  const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
+
+  // 实现多主题平滑挂载及一屏式沉浸感设计，强制不溢出滚动
+  useEffect(() => {
+    document.documentElement.className = `theme-${siteTheme}`;
+    document.body.className = `theme-${siteTheme}`;
+  }, [siteTheme]);
+
+  useEffect(() => {
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+    };
+  }, []);
+
+  // 选择大区时，默认将当前选中省份初始化为该大区关联的第一个省份
+  function selectArea(areaId) {
+    send({ areaId, type: 'SELECT_AREA' });
+    const area = getAreaById(theme, areaId);
+    if (area) {
+      setHoveredAreaId(area.id);
+      setViewLevel('area');
+      setSelectedProvinceAdcode(null);
+      setSelectedFoodItem(null);
+      setNotice(`成功聚焦至：${area.name}`);
+    }
+  }
+
+  function handleHoverArea(areaId) {
+    if (!areaId || viewLevel !== 'country') return;
+    setHoveredAreaId(areaId);
+  }
+
+  function handleFoodItemSelect(item, areaId) {
+    const area = getAreaById(theme, areaId || item.areaId || currentArea.id);
+    const nextFoodItem = {
+      ...item,
+      accent: item.accent || area.color,
+      areaId: area.id,
+      areaName: area.name,
+    };
+
+    setHoveredAreaId(area.id);
+    setSelectedFoodItem(nextFoodItem);
+    send({ areaId: area.id, type: 'SELECT_AREA' });
+
+    if (viewLevel === 'country') {
+      setSelectedProvinceAdcode(null);
+      setViewLevel('area');
+      setNotice(`已进入${area.name}，展开「${nextFoodItem.name}」文化线索`);
+      return;
+    }
+
+    if (nextFoodItem.provinceAdcode) {
+      setSelectedProvinceAdcode(String(nextFoodItem.provinceAdcode));
+      setViewLevel('province');
+    }
+    setNotice(`「${nextFoodItem.name}」文化线索已展开`);
+  }
+
+  function handleSelectProvince(adcode) {
+    setSelectedProvinceAdcode(adcode);
+    setSelectedFoodItem(null);
+  }
+
+  function handleBackCountry() {
+    setSelectedProvinceAdcode(null);
+    setSelectedFoodItem(null);
+    setViewLevel('country');
+    send({ type: 'BACK_COUNTRY' });
+    setNotice('已返回全国信仰文化大盘');
+  }
+
+  function handleBackArea() {
+    setSelectedProvinceAdcode(null);
+    setSelectedFoodItem(null);
+    setViewLevel('area');
+    setNotice(`已返回 ${currentArea?.name}`);
+  }
+
+  const activeAsset = useMemo(() => {
+    if (!currentArea || !currentArea.assets) return null;
+    return currentArea.assets.find(a => String(a.provinceAdcode) === String(selectedProvinceAdcode));
+  }, [currentArea, selectedProvinceAdcode]);
+
+  return (
+    <main className={`app-shell mode-${appMode} theme-${siteTheme}`}>
+      {/* 高端磨砂玻璃顶栏 */}
+      <header className="topbar">
+        <button className="brand" onClick={handleBackCountry} type="button">
+          <div className="brand-icon-wrapper">
+            <Landmark size={22} aria-hidden="true" />
+          </div>
+          <span>{theme.name}</span>
         </button>
+        <div className="topbar-status">
+          <MapPin size={14} aria-hidden="true" />
+          <span>
+            {viewLevel === 'province'
+              ? `已聚焦：${activeAsset ? activeAsset.title.replace('图', '') : '省份详情'}`
+              : viewLevel === 'area'
+              ? `已聚焦：${currentArea.name}`
+              : '中国宗教信仰版图视图'}
+          </span>
+        </div>
+
+        {/* 新增：前端多风格视觉主题切换器 */}
+        <div className="site-theme-switch" aria-label="视觉主题切换">
+          {SITE_THEME_OPTIONS.map((option) => (
+            <button
+              className={siteTheme === option.id ? 'is-active' : ''}
+              key={option.id}
+              onClick={() => {
+                setSiteTheme(option.id);
+                setNotice(option.notice);
+              }}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mode-switch">
+          <button
+            className={appMode === 'run' ? 'is-active' : ''}
+            onClick={() => send({ appMode: 'run', type: 'SET_MODE' })}
+            type="button"
+          >
+            运行模式
+          </button>
+          <button
+            className={appMode === 'dev' ? 'is-active' : ''}
+            onClick={() => send({ appMode: 'dev', type: 'SET_MODE' })}
+            type="button"
+          >
+            AI 开发舱
+          </button>
+        </div>
       </header>
 
+      {/* 主工作台 */}
       <section className="workspace">
+        {/* 左半侧：交互中国地图舞台 */}
         <div className="map-column">
           <div className="map-title-row">
             <div>
-              <span>{theme.labels?.mapSubtitle || `${cultureModule.itemNoun}点位 / 鼠标交互优先`}</span>
+              <span>中国宗教信仰文化区探索 ✦ React 自适应投影</span>
               <h1>
-                {viewLevel === 'country'
-                  ? theme.labels?.countryTitle || theme.name
+                {viewLevel === 'province'
+                  ? `${activeAsset ? activeAsset.title.replace('图', '') : '省份详情'}`
                   : viewLevel === 'area'
-                    ? currentArea?.name || '待配置文化区'
-                    : activeMapAsset?.title || selectedProvinceName}
+                  ? `${currentArea.name}详情`
+                  : '六大信仰文化区总览'}
               </h1>
             </div>
-            <div className="view-tabs" aria-label="视图层级">
-              <button className={viewLevel === 'country' ? 'is-active' : ''} onClick={backCountry} type="button">全国</button>
-              <button className={viewLevel === 'area' ? 'is-active' : ''} disabled={!currentArea} onClick={backArea} type="button">大区</button>
-              <button className={viewLevel === 'province' ? 'is-active' : ''} disabled={!selectedProvinceAdcode} type="button">省份</button>
-            </div>
+            {viewLevel === 'area' && (
+              <button className="secondary-action" onClick={handleBackCountry} type="button">
+                <ArrowLeft size={14} aria-hidden="true" />
+                返回全国
+              </button>
+            )}
+            {viewLevel === 'province' && (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {currentArea && (
+                  <button className="secondary-action" onClick={handleBackArea} type="button">
+                    <ArrowLeft size={14} aria-hidden="true" />
+                    返回大区
+                  </button>
+                )}
+                <button className="secondary-action" onClick={handleBackCountry} type="button">
+                  <ArrowLeft size={14} aria-hidden="true" />
+                  返回全国
+                </button>
+              </div>
+            )}
           </div>
-
-          <InteractiveMap
+          <FoodMap
             assetVersions={assetVersions}
-            cultureModule={cultureModule}
             currentArea={currentArea}
-            hoveredAdcode={hoveredAdcode}
             hoveredAreaId={hoveredAreaId}
-            key={theme.id}
-            onHoverProvince={setHoveredAdcode}
-            onSelectArea={selectArea}
-            onSelectFood={selectFood}
-            onSelectProvince={selectProvince}
-            selectedFood={selectedFood}
-            selectedProvinceAdcode={selectedProvinceAdcode}
-            setHoveredAreaId={setHoveredAreaId}
-            showAiFill={showAiFill}
-            showFoodPins={showFoodPins}
-            theme={theme}
+            selectedFoodItem={selectedFoodItem}
             viewLevel={viewLevel}
+            onFoodItemSelect={handleFoodItemSelect}
+            onHoverArea={handleHoverArea}
+            onSelectArea={selectArea}
+            selectedProvinceAdcode={selectedProvinceAdcode}
+            onSelectProvince={handleSelectProvince}
+            onViewLevelChange={setViewLevel}
+            provinceAreaMap={provinceAreaMap}
+            theme={theme}
           />
         </div>
 
+        {/* 右半侧：控制或游戏交互摘要栏 */}
         <div className="side-column">
-          <DetailPanel
-            activeAsset={activeMapAsset}
-            assetVersions={assetVersions}
-            cultureModule={cultureModule}
-            currentArea={currentArea}
-            onBackArea={backArea}
-            onBackCountry={backCountry}
-            selectedFood={selectedFood}
-            selectedProvinceName={selectedProvinceName}
-            showFoodPins={showFoodPins}
-            toggleFoodPins={() => setShowFoodPins((value) => !value)}
-            theme={theme}
-            viewLevel={viewLevel}
-          />
+          {appMode === 'dev' ? (
+            <McpPanel
+              assetVersions={assetVersions}
+              currentArea={currentArea}
+              flowStep={flowStep}
+              onAssetRegenerated={(asset, cacheBust) => {
+                setAssetVersions((prev) => ({
+                  ...prev,
+                  [asset.outputImage]: cacheBust,
+                }));
+              }}
+              onFlowStep={(nextStep) => send({ flowStep: nextStep, type: 'SET_FLOW_STEP' })}
+              onSelectArea={selectArea}
+              onToolResult={setNotice}
+              theme={theme}
+            />
+          ) : (
+            <RunSummary
+              assetVersions={assetVersions}
+              currentArea={currentArea}
+              selectedFoodItem={selectedFoodItem}
+              selectedProvinceAdcode={selectedProvinceAdcode}
+              viewLevel={viewLevel}
+              onBackCountry={handleBackCountry}
+              onBackArea={handleBackArea}
+              onSelectArea={selectArea}
+              theme={theme}
+            />
+          )}
 
-          <div className="notice-bar">
-            <Check size={15} aria-hidden="true" />
-            <span>{notice}</span>
+          {/* 底部悬浮的日志通知与复位卡片 */}
+          <div className="side-card notice-card">
+            <div>
+              <div className="card-kicker">
+                <Check size={14} aria-hidden="true" />
+                <span>系统监控日志</span>
+              </div>
+              <p title={notice}>{notice}</p>
+            </div>
+            <button
+              className="secondary-action btn-reset"
+              onClick={() => {
+                resetTheme();
+                setSelectedProvinceAdcode(null);
+                setSelectedFoodItem(null);
+                setHoveredAreaId('north-ancestor-ritual');
+                setViewLevel('country');
+                send({ type: 'BACK_COUNTRY' });
+                setNotice('系统成功复位：地图已恢复至默认宗教信仰文化配置');
+              }}
+              type="button"
+            >
+              <RefreshCw size={12} aria-hidden="true" />
+              重置
+            </button>
           </div>
         </div>
       </section>
