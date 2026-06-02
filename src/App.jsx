@@ -41,6 +41,15 @@ import {
   getAreaById,
 } from './foodMapConfig.js';
 import { useFoodMapStore } from './useFoodMapStore.js';
+import {
+  useAnimeFoodLayer,
+  useAnimeFoodSelection,
+  useAnimeHoverInteractions,
+  useAnimeMapStage,
+  useAnimePanelMotion,
+  useAnimeSpinners,
+  useAnimeThemeSwap,
+} from './animeMotion.js';
 
 // 中国省级地图 GeoJSON 边界数据路径
 const GEO_URL = '/geo/china.json';
@@ -645,12 +654,12 @@ function FoodMap({
   );
 
   const foodLayerKey = `${activeFoodArea?.id || 'country'}-${viewLevel}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}`;
+  const mapFillKey = `${viewLevel}-${currentArea?.id || 'country'}-${selectedProvinceAdcode || 'none'}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}-${Object.values(assetVersions).join('-')}`;
+  const foodSelectionKey = `${foodLayerKey}-${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}`;
 
-  useEffect(() => {
-    setIsFoodLayerReady(false);
-    const timer = window.setTimeout(() => setIsFoodLayerReady(true), 1160);
-    return () => window.clearTimeout(timer);
-  }, [foodLayerKey]);
+  useAnimeMapStage(mapStageRef, mapFillKey, mapLoading);
+  useAnimeFoodLayer(mapStageRef, foodLayerKey, foodLayoutItems.length, setIsFoodLayerReady);
+  useAnimeFoodSelection(mapStageRef, foodSelectionKey, isFoodLayerReady);
 
   return (
     <div className="map-stage" ref={mapStageRef}>
@@ -807,6 +816,7 @@ function FoodMap({
             {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && (
               <image
                 className="map-fill-image map-fill-country"
+                data-anime-opacity="1"
                 href={getVersionedAsset(theme.chinaAsset?.src || '/assets/food/china-food-ai.png')}
                 key="country-food-map"
                 x={chinaBounds.x}
@@ -822,6 +832,7 @@ function FoodMap({
             {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
               <image
                 className="map-fill-image map-fill-area"
+                data-anime-opacity="1"
                 href={getVersionedAsset(currentArea.summaryAsset?.src)}
                 key={`area-food-map-${currentArea.id}`}
                 x={areaBounds.x}
@@ -840,6 +851,7 @@ function FoodMap({
                 {theme.useImageFills !== false && areaBounds && (
                   <image
                     className="map-fill-image map-fill-area is-soft"
+                    data-anime-opacity="0.18"
                     href={getVersionedAsset(currentArea.summaryAsset?.src)}
                     key={`area-food-map-soft-${currentArea.id}`}
                     x={areaBounds.x}
@@ -848,7 +860,6 @@ function FoodMap({
                     height={areaBounds.h}
                     clipPath={`url(#clip-area-${currentArea.id})`}
                     preserveAspectRatio="none"
-                    opacity={0.18}
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
@@ -861,6 +872,7 @@ function FoodMap({
                     return (
                       <image
                         className="map-fill-image map-fill-province"
+                        data-anime-opacity="1"
                         href={getVersionedAsset(asset ? asset.src : `/assets/food/${adcode}_contour.png`)}
                         key={`province-food-map-${adcode}`}
                         x={bounds.x}
@@ -933,12 +945,8 @@ function FoodMap({
                 title={item.name}
                 type="button"
               >
-              <span className="food-float-content">
+                <span className="food-float-content">
                   <span className="culture-symbol" aria-hidden="true">{item.symbol || item.name.slice(0, 1)}</span>
-                  <span className="food-float-label">{item.name}</span>
-                </span>
-                <span className="food-float-ghost" aria-hidden="true">
-                  <span className="culture-symbol">{item.symbol || item.name.slice(0, 1)}</span>
                   <span className="food-float-label">{item.name}</span>
                 </span>
               </button>
@@ -971,6 +979,7 @@ function FoodMap({
  */
 function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProvinceAdcode, viewLevel, onBackCountry, onBackArea, onSelectArea, theme }) {
   // 分数统计及答题闯关状态
+  const panelRef = useRef(null);
   const [score, setScore] = useState(0);
   const [answeredMap, setAnsweredMap] = useState({}); // 保存每个省份/大区的答题记录
   const [selectedOption, setSelectedOption] = useState(null);
@@ -1011,6 +1020,9 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }, [quizKey]);
 
   const isCurrentCorrect = answeredMap[quizKey] === 'correct';
+  const panelMotionKey = `${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}-${quizKey}-${selectedOption ?? 'none'}-${isAnswered}-${isCurrentCorrect}`;
+
+  useAnimePanelMotion(panelRef, panelMotionKey);
 
   function versionedImage(src) {
     const cleanSrc = String(src || '').split('?')[0];
@@ -1039,7 +1051,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }
 
   return (
-    <aside className="side-card run-card">
+    <aside className="side-card run-card" ref={panelRef}>
       <div className="card-kicker">
         <Landmark size={16} aria-hidden="true" />
         <span>
@@ -1131,7 +1143,10 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
             {selectedFoodItem.process.map((step, index) => (
               <article className="process-sketch-step" key={`${selectedFoodItem.id}-step-${index}`}>
                 <div className="sketch-icon" aria-hidden="true">
-                  <i />
+                  <i>
+                    <span className="steam-line steam-line-left" />
+                    <span className="steam-line steam-line-right" />
+                  </i>
                   <b>{index + 1}</b>
                 </div>
                 <p>{step}</p>
@@ -1239,6 +1254,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
  * AI 灵感生成舱：开发模式下步骤式引导评委和开发者接入 MCP 协议与 AI 交互控制台
  */
 function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, onFlowStep, onSelectArea, onToolResult, theme }) {
+  const panelRef = useRef(null);
   const [prompt, setPrompt] = useState('');
   const [assetPrompt, setAssetPrompt] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState('');
@@ -1389,8 +1405,10 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
     }
   }, [selectedImageAsset]);
 
+  useAnimeSpinners(panelRef, `${mcpMutation.isPending}-${regenerateMutation.isPending}`);
+
   return (
-    <aside className="side-card mcp-panel">
+    <aside className="side-card mcp-panel" ref={panelRef}>
       <div className="card-kicker">
         <Bot size={16} aria-hidden="true" />
         <span>AI 灵感生成舱控制台</span>
@@ -1477,7 +1495,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
       {/* 桥接状态监控 */}
       <div className="mcp-status">
         <span>{toolsLoading ? '探测后台 API 隧道...' : `发现 ${tools?.tools?.length || 0} 个活动 AI MCP 通道`}</span>
-        {mcpMutation.isPending && <Loader2 className="spin" size={14} aria-hidden="true" />}
+        {mcpMutation.isPending && <Loader2 className="anime-spin" size={14} aria-hidden="true" />}
       </div>
 
       {/* 生成的 Prompt 或已有图片资产路径展示 */}
@@ -1556,7 +1574,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
                 onClick={() => regenerateMutation.mutate({ assetId: selectedImageAsset.id, prompt: assetPrompt })}
                 type="button"
               >
-                {regenerateMutation.isPending ? <Loader2 className="spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
+                {regenerateMutation.isPending ? <Loader2 className="anime-spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
                 重新生成
               </button>
             </div>
@@ -1571,6 +1589,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
  * 宗教信仰文化交互地图大盘——React 核心主入口组件
  */
 function App() {
+  const appRef = useRef(null);
   const [notice, setNotice] = useState('宗教信仰文化地图已就绪，等待探索');
   const [assetVersions, setAssetVersions] = useState({});
   const [siteTheme, setSiteTheme] = useState('dark-ink'); // 全局视觉主题：见 SITE_THEME_OPTIONS
@@ -1584,6 +1603,9 @@ function App() {
   const { appMode, flowStep, selectedAreaId } = snapshot.context;
   const currentArea = getAreaById(theme, selectedAreaId);
   const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
+
+  useAnimeHoverInteractions(appRef);
+  useAnimeThemeSwap(appRef, siteTheme);
 
   // 实现多主题平滑挂载及一屏式沉浸感设计，强制不溢出滚动
   useEffect(() => {
@@ -1671,7 +1693,7 @@ function App() {
   }, [currentArea, selectedProvinceAdcode]);
 
   return (
-    <main className={`app-shell mode-${appMode} theme-${siteTheme}`}>
+    <main className={`app-shell mode-${appMode} theme-${siteTheme}`} ref={appRef}>
       {/* 高端磨砂玻璃顶栏 */}
       <header className="topbar">
         <button className="brand" onClick={handleBackCountry} type="button">

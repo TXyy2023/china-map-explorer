@@ -15,4 +15,7 @@ scripts/__pycache__/
 .env.*
 !.env.example
 
+# Keep the shared agent guide under version control.
+!Agent.md
+
 tmp_render_png.js

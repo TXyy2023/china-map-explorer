@@ -22,7 +22,6 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
-  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
 html.theme-dark-ink, body.theme-dark-ink {
@@ -79,7 +78,6 @@ html.theme-market-night, body.theme-market-night {
   height: 100dvh;
   overflow: hidden;
   color: var(--ink);
-  transition: background 0.4s ease, color 0.4s ease;
 }
 
 /* 1. 玄墨科技风 (默认) */
@@ -235,7 +233,6 @@ html.theme-market-night, body.theme-market-night {
   background: var(--panel);
   backdrop-filter: blur(20px);
   z-index: 10;
-  transition: background 0.4s ease, border-color 0.4s ease;
 }
 
 .brand {
@@ -259,11 +256,6 @@ html.theme-market-night, body.theme-market-night {
   background: linear-gradient(135deg, #d4af37, #aa841c);
   box-shadow: 0 0 15px rgba(212, 175, 55, 0.35);
   color: #070a0e;
-  transition: transform 0.3s ease;
-}
-
-.brand:hover .brand-icon-wrapper {
-  transform: rotate(15deg) scale(1.05);
 }
 
 .brand span {
@@ -312,7 +304,6 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .mode-switch button.is-active {
@@ -376,7 +367,6 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .secondary-action:hover {
@@ -393,7 +383,6 @@ html.theme-market-night, body.theme-market-night {
   border-radius: 16px;
   background: var(--map-stage-bg);
   box-shadow: var(--map-stage-shadow);
-  transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
 }
 
 .map-stage svg {
@@ -404,16 +393,11 @@ html.theme-market-night, body.theme-market-night {
 
 .map-loading {
   fill: var(--accent);
+  opacity: 0.4;
   font-size: 1.1rem;
   font-weight: 600;
   letter-spacing: 2px;
   text-anchor: middle;
-  animation: mapPulse 2s infinite ease-in-out;
-}
-
-@keyframes mapPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.9; }
 }
 
 .map-fill-image {
@@ -423,41 +407,20 @@ html.theme-market-night, body.theme-market-night {
   filter:
     drop-shadow(0 10px 20px rgba(0, 0, 0, 0.28))
     drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.18));
-  animation: mapFillReveal 0.62s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   will-change: opacity, transform, filter;
 }
 
 .map-fill-image.is-soft {
-  animation-duration: 0.46s;
-}
-
-@keyframes mapFillReveal {
-  0% {
-    opacity: 0;
-    transform: scale(0.965);
-    filter:
-      blur(4px)
-      drop-shadow(0 4px 8px rgba(0, 0, 0, 0.18))
-      drop-shadow(0 0 0 rgba(var(--accent-rgb), 0));
-  }
-  65% {
-    opacity: 1;
-    transform: scale(1.018);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-    filter:
-      drop-shadow(0 10px 20px rgba(0, 0, 0, 0.28))
-      drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.18));
-  }
+  opacity: 0;
 }
 
 /* 省份地图样式及Hover高光 */
 .province {
   cursor: pointer;
-  transition: all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
   stroke-linejoin: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
 }
 
 .province.is-hidden {
@@ -547,14 +510,12 @@ html.theme-market-night, body.theme-market-night {
 }
 
 .food-orbit-layer.is-ready .food-float-content {
-  animation: none;
   opacity: 1;
   transform: rotate(var(--food-rotate)) scale(1);
   filter: blur(0) saturate(1);
 }
 
-.food-float-content,
-.food-float-ghost {
+.food-float-content {
   display: grid;
   grid-template-rows: var(--food-size) 24px;
   gap: 5px;
@@ -571,32 +532,17 @@ html.theme-market-night, body.theme-market-night {
     0 12px 24px rgba(0, 0, 0, 0.28),
     0 0 18px color-mix(in srgb, var(--food-accent) 24%, transparent);
   backdrop-filter: blur(10px);
-  transition:
-    border-color 0.24s ease,
-    box-shadow 0.24s ease,
-    filter 0.24s ease,
-    transform 0.24s ease;
   will-change: transform, opacity, filter;
 }
 
 .food-float-content {
   position: relative;
   z-index: 1;
-  opacity: 1;
-  transform: rotate(var(--food-rotate)) scale(1);
-}
-
-.food-float-ghost {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
   opacity: 0;
-  animation: foodBurstGhost 0.78s cubic-bezier(0.16, 1, 0.3, 1) var(--food-delay) both;
+  transform: rotate(var(--food-rotate)) scale(0.98);
 }
 
-.food-float-content img,
-.food-float-ghost img {
+.food-float-content img {
   display: block;
   width: var(--food-size);
   height: var(--food-size);
@@ -652,7 +598,6 @@ html.theme-market-night, body.theme-market-night {
 .food-float-item.is-selected .food-float-content {
   border-color: var(--food-accent);
   filter: saturate(1.08);
-  transform: rotate(0deg) scale(1.08);
   box-shadow:
     0 16px 32px rgba(0, 0, 0, 0.34),
     0 0 24px color-mix(in srgb, var(--food-accent) 44%, transparent);
@@ -663,34 +608,9 @@ html.theme-market-night, body.theme-market-night {
   color: #071014;
 }
 
-@keyframes foodBurstGhost {
-  0% {
-    opacity: 0;
-    transform:
-      translate(calc(var(--from-x) - var(--to-x)), calc(var(--from-y) - var(--to-y)))
-      scale(0.24)
-      rotate(-18deg);
-    filter: blur(8px) saturate(0.8);
-  }
-  18% {
-    opacity: 0.94;
-  }
-  64% {
-    opacity: 0.88;
-    transform: translate(0, 0) scale(1.12) rotate(0deg);
-    filter: blur(0) saturate(1.05);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(0, 0) scale(1.06) rotate(var(--food-rotate));
-    filter: blur(0) saturate(1);
-  }
-}
-
 /* AI 图片在地图上的 3D 卡片效果 */
 .map-image-object {
   overflow: visible;
-  transition: all 0.4s ease;
 }
 
 .map-image-card {
@@ -701,7 +621,8 @@ html.theme-market-night, body.theme-market-night {
   border-radius: 12px;
   background: var(--card-bg);
   transform: perspective(600px) rotateX(10deg);
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform-origin: center;
+  will-change: transform;
 }
 
 .map-image-object.is-active-card .map-image-card {
@@ -711,7 +632,6 @@ html.theme-market-night, body.theme-market-night {
 }
 
 .map-image-card:hover {
-  transform: perspective(600px) rotateX(0deg) translateY(-8px) scale(1.03);
   border-color: var(--accent);
   box-shadow: var(--card-shadow-hover);
 }
@@ -768,13 +688,12 @@ html.theme-market-night, body.theme-market-night {
   font-weight: 600;
   cursor: pointer;
   pointer-events: auto;
-  transition: all 0.2s ease;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  will-change: transform;
 }
 
 .map-legend button:hover {
   border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
   background: rgba(20, 30, 40, 0.9);
 }
 
@@ -920,13 +839,12 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.82rem;
   font-weight: 800;
   text-align: left;
-  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  will-change: transform;
 }
 
 .area-overview-list button:hover {
   border-color: var(--area-color);
   background: linear-gradient(135deg, color-mix(in srgb, var(--area-color) 16%, transparent), rgba(255,255,255,0.02));
-  transform: translateX(3px);
 }
 
 .area-overview-list i {
@@ -953,7 +871,7 @@ html.theme-market-night, body.theme-market-night {
   background:
     linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.015)),
     rgba(0, 0, 0, 0.12);
-  animation: processCardIn 0.46s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
 }
 
 .food-process-head {
@@ -1012,12 +930,8 @@ html.theme-market-night, body.theme-market-night {
   border: 1px solid rgba(255, 255, 255, 0.055);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.028);
-  animation: sketchStepIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
 }
-
-.process-sketch-step:nth-child(2) { animation-delay: 70ms; }
-.process-sketch-step:nth-child(3) { animation-delay: 140ms; }
-.process-sketch-step:nth-child(4) { animation-delay: 210ms; }
 
 .sketch-icon {
   position: relative;
@@ -1036,26 +950,23 @@ html.theme-market-night, body.theme-market-night {
   border-radius: 0 0 18px 18px;
 }
 
-.sketch-icon i::before,
-.sketch-icon i::after {
+.steam-line {
   position: absolute;
   top: -15px;
   width: 2px;
   height: 11px;
   border-radius: 2px;
   background: var(--accent);
-  opacity: 0.75;
-  content: '';
-  animation: steamLine 1.2s ease-in-out infinite;
+  opacity: 0.2;
+  will-change: opacity, transform;
 }
 
-.sketch-icon i::before {
+.steam-line-left {
   left: 8px;
 }
 
-.sketch-icon i::after {
+.steam-line-right {
   right: 8px;
-  animation-delay: 0.28s;
 }
 
 .sketch-icon b {
@@ -1079,39 +990,6 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.82rem;
   font-weight: 700;
   line-height: 1.45;
-}
-
-@keyframes processCardIn {
-  0% {
-    opacity: 0;
-    transform: translateX(18px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes sketchStepIn {
-  0% {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes steamLine {
-  0%, 100% {
-    opacity: 0.2;
-    transform: translateY(2px);
-  }
-  50% {
-    opacity: 0.8;
-    transform: translateY(-3px);
-  }
 }
 
 .run-card .secondary-action {
@@ -1153,7 +1031,7 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.72rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
+  will-change: transform;
 }
 
 .stepper button.is-active {
@@ -1193,7 +1071,6 @@ html.theme-market-night, body.theme-market-night {
   background: rgba(255, 255, 255, 0.02);
   color: #fff;
   font-size: 0.85rem;
-  transition: all 0.2s ease;
 }
 
 .mcp-form input,
@@ -1249,7 +1126,7 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  will-change: transform;
 }
 
 /* 开发动作按钮细分 */
@@ -1259,7 +1136,6 @@ html.theme-market-night, body.theme-market-night {
   box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
 }
 .mcp-actions button[type="submit"]:hover {
-  transform: translateY(-1px);
   box-shadow: 0 6px 15px rgba(212, 175, 55, 0.35);
 }
 
@@ -1279,14 +1155,12 @@ html.theme-market-night, body.theme-market-night {
   box-shadow: 0 4px 12px rgba(31, 118, 110, 0.2);
 }
 .mcp-actions button.btn-save:hover {
-  transform: translateY(-1px);
   box-shadow: 0 6px 15px rgba(31, 118, 110, 0.35);
 }
 
 .mcp-actions button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  transform: none !important;
 }
 
 .mcp-status {
@@ -1427,7 +1301,7 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.78rem;
   font-weight: 800;
   cursor: pointer;
-  transition: all 0.2s ease;
+  will-change: transform;
 }
 
 .asset-actions .btn-regenerate {
@@ -1437,14 +1311,12 @@ html.theme-market-night, body.theme-market-night {
 }
 
 .asset-actions button:hover {
-  transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.18);
 }
 
 .asset-actions button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  transform: none;
 }
 
 /* 状态通知日志 */
@@ -1483,12 +1355,8 @@ html.theme-market-night, body.theme-market-night {
   border-color: #d4af37;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.anime-spin {
+  will-change: transform;
 }
 
 /* ==========================================
@@ -1559,7 +1427,7 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.78rem;
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s ease;
+  will-change: transform;
 }
 
 .quiz-option-btn:hover {
@@ -1606,11 +1474,10 @@ html.theme-market-night, body.theme-market-night {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(212,175,55,0.25);
-  transition: all 0.2s ease;
+  will-change: transform;
 }
 
 .game-reward button:hover {
-  transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(212,175,55,0.4);
 }
 
@@ -1676,7 +1543,6 @@ html.theme-market-night, body.theme-market-night {
   border: 1px solid var(--stroke);
   border-radius: 99px;
   background: rgba(255, 255, 255, 0.02);
-  transition: all 0.3s ease;
   scrollbar-width: none;
 }
 
@@ -1698,7 +1564,7 @@ html.theme-market-night, body.theme-market-night {
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  will-change: transform;
 }
 
 .site-theme-switch button:hover {
