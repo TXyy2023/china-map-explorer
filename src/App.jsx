@@ -20,6 +20,7 @@ import { z } from 'zod';
 import {
   ArrowLeft,
   Bot,
+  Building2,
   Check,
   Image as ImageIcon,
   Landmark,
@@ -34,22 +35,16 @@ import {
   Award,
 } from 'lucide-react';
 import {
+  CULTURE_THEME_OPTIONS,
+  DEFAULT_CULTURE_THEME_ID,
   FLOW_STEPS,
   DEFAULT_FOOD_THEME,
   FOOD_IMAGE_ASSET,
   buildProvinceAreaMap,
   getAreaById,
+  getCultureThemeById,
 } from './foodMapConfig.js';
 import { useFoodMapStore } from './useFoodMapStore.js';
-import {
-  useAnimeFoodLayer,
-  useAnimeFoodSelection,
-  useAnimeHoverInteractions,
-  useAnimeMapStage,
-  useAnimePanelMotion,
-  useAnimeSpinners,
-  useAnimeThemeSwap,
-} from './animeMotion.js';
 
 // 中国省级地图 GeoJSON 边界数据路径
 const GEO_URL = '/geo/china.json';
@@ -66,15 +61,6 @@ const PROVINCE_LABEL_OFFSETS = {
   '810000': { area: [32, 15], country: [28, 12], province: [32, 15] },
   '820000': { area: [-34, 20], country: [-30, 18], province: [-34, 20] },
 };
-
-const SITE_THEME_OPTIONS = [
-  { id: 'dark-ink', label: '玄墨', notice: '系统视觉已切换为：玄墨科技风 ✦' },
-  { id: 'light-xuan', label: '宣纸', notice: '系统视觉已切换为：典雅宣纸风 ❀' },
-  { id: 'emerald-shanshui', label: '黛绿', notice: '系统视觉已切换为：黛绿山水风 ❈' },
-  { id: 'crimson-palace', label: '宫红', notice: '系统视觉已切换为：宫红礼乐风' },
-  { id: 'porcelain-blue', label: '青瓷', notice: '系统视觉已切换为：青瓷雅集风' },
-  { id: 'market-night', label: '灯火', notice: '系统视觉已切换为：灯火庙会风' },
-];
 
 /**
  * 由 XState 严谨驱动的视图状态机
@@ -113,6 +99,11 @@ const mapMachine = createMachine({
     SET_MODE: {
       actions: assign({
         appMode: ({ event }) => event.appMode,
+      }),
+    },
+    SET_ACTIVE_AREA: {
+      actions: assign({
+        selectedAreaId: ({ event }) => event.areaId,
       }),
     },
   },
@@ -295,7 +286,7 @@ function normalizeFoodItems(area) {
         image: asset.src,
         name: asset.title.replace('图', ''),
         provinceAdcode: asset.provinceAdcode,
-        process: ['识别核心场景', '梳理信仰关键词', '连接区域省份', '转化为 UI 热点'],
+        process: ['识别核心场景', '梳理文化关键词', '连接区域省份', '转化为 UI 热点'],
       }));
 
   return items.map((item, index) => ({
@@ -309,6 +300,26 @@ function normalizeFoodItems(area) {
     process: item.process?.length ? item.process : ['识别场景', '提取关键词', '关联省份', '形成讲解卡'],
     provinceAdcode: item.provinceAdcode || area.provinceAdcodes?.[0],
   }));
+}
+
+function getThemeCopy(theme) {
+  return {
+    areaCountLabel: '文化区',
+    areaDetailLabel: '文化区详情',
+    countryKicker: theme?.name || '中国文化地图',
+    countryStatus: `${theme?.name || '中国文化地图'}视图`,
+    exploreLabel: '中国文化区探索 ✦ React 自适应投影',
+    loadingLabel: '文化地图加载中...',
+    overviewTitle: `${theme?.areas?.length || 0} 大文化区总览`,
+    provinceDescription: '探索省级文化线索。',
+    provinceLabel: '省级文化线索',
+    quizLabel: '文化区知识问答',
+    readyNotice: '中国文化地图已就绪，等待探索',
+    resetNotice: '系统成功复位：地图已恢复至默认文化配置',
+    returnCountryNotice: '已返回全国文化大盘',
+    targetAreaLabel: '目标文化区',
+    ...(theme?.copy || {}),
+  };
 }
 
 function isInsideRect(point, rect, padding = 0) {
@@ -461,6 +472,7 @@ function FoodMap({
     y: FALLBACK_MAP_SIZE.height / 2,
   });
   const [isFoodLayerReady, setIsFoodLayerReady] = useState(false);
+  const themeCopy = getThemeCopy(theme);
 
   function getVersionedAsset(src) {
     const cleanSrc = String(src || '').split('?')[0];
@@ -654,12 +666,12 @@ function FoodMap({
   );
 
   const foodLayerKey = `${activeFoodArea?.id || 'country'}-${viewLevel}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}`;
-  const mapFillKey = `${viewLevel}-${currentArea?.id || 'country'}-${selectedProvinceAdcode || 'none'}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}-${Object.values(assetVersions).join('-')}`;
-  const foodSelectionKey = `${foodLayerKey}-${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}`;
 
-  useAnimeMapStage(mapStageRef, mapFillKey, mapLoading);
-  useAnimeFoodLayer(mapStageRef, foodLayerKey, foodLayoutItems.length, setIsFoodLayerReady);
-  useAnimeFoodSelection(mapStageRef, foodSelectionKey, isFoodLayerReady);
+  useEffect(() => {
+    setIsFoodLayerReady(false);
+    const timer = window.setTimeout(() => setIsFoodLayerReady(true), 1160);
+    return () => window.clearTimeout(timer);
+  }, [foodLayerKey]);
 
   return (
     <div className="map-stage" ref={mapStageRef}>
@@ -700,7 +712,7 @@ function FoodMap({
 
         {mapLoading ? (
           <text className="map-loading" x={mapSize.width / 2} y={mapSize.height / 2}>
-            宗教信仰文化地图加载中...
+            {themeCopy.loadingLabel}
           </text>
         ) : (
           <>
@@ -816,7 +828,6 @@ function FoodMap({
             {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && (
               <image
                 className="map-fill-image map-fill-country"
-                data-anime-opacity="1"
                 href={getVersionedAsset(theme.chinaAsset?.src || '/assets/food/china-food-ai.png')}
                 key="country-food-map"
                 x={chinaBounds.x}
@@ -832,7 +843,6 @@ function FoodMap({
             {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
               <image
                 className="map-fill-image map-fill-area"
-                data-anime-opacity="1"
                 href={getVersionedAsset(currentArea.summaryAsset?.src)}
                 key={`area-food-map-${currentArea.id}`}
                 x={areaBounds.x}
@@ -851,7 +861,6 @@ function FoodMap({
                 {theme.useImageFills !== false && areaBounds && (
                   <image
                     className="map-fill-image map-fill-area is-soft"
-                    data-anime-opacity="0.18"
                     href={getVersionedAsset(currentArea.summaryAsset?.src)}
                     key={`area-food-map-soft-${currentArea.id}`}
                     x={areaBounds.x}
@@ -860,6 +869,7 @@ function FoodMap({
                     height={areaBounds.h}
                     clipPath={`url(#clip-area-${currentArea.id})`}
                     preserveAspectRatio="none"
+                    opacity={0.18}
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
@@ -872,7 +882,6 @@ function FoodMap({
                     return (
                       <image
                         className="map-fill-image map-fill-province"
-                        data-anime-opacity="1"
                         href={getVersionedAsset(asset ? asset.src : `/assets/food/${adcode}_contour.png`)}
                         key={`province-food-map-${adcode}`}
                         x={bounds.x}
@@ -945,8 +954,12 @@ function FoodMap({
                 title={item.name}
                 type="button"
               >
-                <span className="food-float-content">
+              <span className="food-float-content">
                   <span className="culture-symbol" aria-hidden="true">{item.symbol || item.name.slice(0, 1)}</span>
+                  <span className="food-float-label">{item.name}</span>
+                </span>
+                <span className="food-float-ghost" aria-hidden="true">
+                  <span className="culture-symbol">{item.symbol || item.name.slice(0, 1)}</span>
                   <span className="food-float-label">{item.name}</span>
                 </span>
               </button>
@@ -979,11 +992,11 @@ function FoodMap({
  */
 function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProvinceAdcode, viewLevel, onBackCountry, onBackArea, onSelectArea, theme }) {
   // 分数统计及答题闯关状态
-  const panelRef = useRef(null);
   const [score, setScore] = useState(0);
   const [answeredMap, setAnsweredMap] = useState({}); // 保存每个省份/大区的答题记录
   const [selectedOption, setSelectedOption] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
+  const themeCopy = getThemeCopy(theme);
 
   // 寻找当前选中的省级文化资产
   const activeAsset = useMemo(() => {
@@ -1020,9 +1033,6 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }, [quizKey]);
 
   const isCurrentCorrect = answeredMap[quizKey] === 'correct';
-  const panelMotionKey = `${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}-${quizKey}-${selectedOption ?? 'none'}-${isAnswered}-${isCurrentCorrect}`;
-
-  useAnimePanelMotion(panelRef, panelMotionKey);
 
   function versionedImage(src) {
     const cleanSrc = String(src || '').split('?')[0];
@@ -1051,15 +1061,15 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }
 
   return (
-    <aside className="side-card run-card" ref={panelRef}>
+    <aside className="side-card run-card">
       <div className="card-kicker">
         <Landmark size={16} aria-hidden="true" />
         <span>
           {viewLevel === 'province'
-            ? '省级信仰线索'
+            ? themeCopy.provinceLabel
             : viewLevel === 'area'
-            ? '信仰文化区详情'
-            : '中国宗教信仰版图'}
+            ? themeCopy.areaDetailLabel
+            : themeCopy.countryKicker}
         </span>
       </div>
       
@@ -1072,7 +1082,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
       </h2>
       <p>
         {viewLevel === 'province' && activeAsset
-          ? (activeAsset.quiz?.question ? `这里展示${activeAsset.title.replace('图', '')}，用于理解该省份在当前信仰区中的文化线索与代表性场景。` : '探索省级信仰文化线索。')
+          ? (activeAsset.quiz?.question ? `这里展示${activeAsset.title.replace('图', '')}，用于理解该省份在当前文化区中的文化线索与代表性场景。` : themeCopy.provinceDescription)
           : (viewLevel === 'area' && currentArea)
           ? currentArea.description
           : theme.description}
@@ -1092,7 +1102,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
         {viewLevel === 'country' ? (
           <>
             <span style={{ color: '#d4af37', borderColor: '#d4af3740', background: '#d4af3710' }}>
-              {theme.areas.length} 个信仰文化区
+              {theme.areas.length} 个{themeCopy.areaCountLabel}
             </span>
             <span>
               {theme.areas.reduce((acc, a) => acc + (a.assets?.length || 0), 0)} 条省级线索
@@ -1143,10 +1153,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
             {selectedFoodItem.process.map((step, index) => (
               <article className="process-sketch-step" key={`${selectedFoodItem.id}-step-${index}`}>
                 <div className="sketch-icon" aria-hidden="true">
-                  <i>
-                    <span className="steam-line steam-line-left" />
-                    <span className="steam-line steam-line-right" />
-                  </i>
+                  <i />
                   <b>{index + 1}</b>
                 </div>
                 <p>{step}</p>
@@ -1163,7 +1170,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <HelpCircle size={15} style={{ color: '#d4af37' }} />
               <span>
-                {viewLevel === 'province' && activeAsset ? `${activeAsset.title.substring(0, 3)}·线索问答` : '信仰区知识问答'}
+                {viewLevel === 'province' && activeAsset ? `${activeAsset.title.substring(0, 3)}·线索问答` : themeCopy.quizLabel}
               </span>
             </div>
             <div className="score-badge">
@@ -1254,12 +1261,12 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
  * AI 灵感生成舱：开发模式下步骤式引导评委和开发者接入 MCP 协议与 AI 交互控制台
  */
 function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, onFlowStep, onSelectArea, onToolResult, theme }) {
-  const panelRef = useRef(null);
   const [prompt, setPrompt] = useState('');
   const [assetPrompt, setAssetPrompt] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const attachImageAsset = useFoodMapStore((state) => state.attachImageAsset);
   const updateAreaConfig = useFoodMapStore((state) => state.updateAreaConfig);
+  const themeCopy = getThemeCopy(theme);
 
   // 借助 React Query 查询当前暴露的 MCP 工具列表
   const { data: tools, isLoading: toolsLoading } = useQuery({
@@ -1405,10 +1412,8 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
     }
   }, [selectedImageAsset]);
 
-  useAnimeSpinners(panelRef, `${mcpMutation.isPending}-${regenerateMutation.isPending}`);
-
   return (
-    <aside className="side-card mcp-panel" ref={panelRef}>
+    <aside className="side-card mcp-panel">
       <div className="card-kicker">
         <Bot size={16} aria-hidden="true" />
         <span>AI 灵感生成舱控制台</span>
@@ -1430,7 +1435,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
 
       <form className="mcp-form" onSubmit={form.handleSubmit(generatePrompt)}>
         <label>
-          <span>1. 目标信仰文化区</span>
+          <span>1. {themeCopy.targetAreaLabel}</span>
           <select
             {...form.register('areaId')}
             onChange={(event) => {
@@ -1495,7 +1500,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
       {/* 桥接状态监控 */}
       <div className="mcp-status">
         <span>{toolsLoading ? '探测后台 API 隧道...' : `发现 ${tools?.tools?.length || 0} 个活动 AI MCP 通道`}</span>
-        {mcpMutation.isPending && <Loader2 className="anime-spin" size={14} aria-hidden="true" />}
+        {mcpMutation.isPending && <Loader2 className="spin" size={14} aria-hidden="true" />}
       </div>
 
       {/* 生成的 Prompt 或已有图片资产路径展示 */}
@@ -1574,7 +1579,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
                 onClick={() => regenerateMutation.mutate({ assetId: selectedImageAsset.id, prompt: assetPrompt })}
                 type="button"
               >
-                {regenerateMutation.isPending ? <Loader2 className="anime-spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
+                {regenerateMutation.isPending ? <Loader2 className="spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
                 重新生成
               </button>
             </div>
@@ -1589,23 +1594,22 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
  * 宗教信仰文化交互地图大盘——React 核心主入口组件
  */
 function App() {
-  const appRef = useRef(null);
-  const [notice, setNotice] = useState('宗教信仰文化地图已就绪，等待探索');
+  const [notice, setNotice] = useState(getThemeCopy(getCultureThemeById(DEFAULT_CULTURE_THEME_ID)).readyNotice);
   const [assetVersions, setAssetVersions] = useState({});
-  const [siteTheme, setSiteTheme] = useState('dark-ink'); // 全局视觉主题：见 SITE_THEME_OPTIONS
+  const siteTheme = 'dark-ink';
   const [hoveredAreaId, setHoveredAreaId] = useState('north-ancestor-ritual');
   const [selectedFoodItem, setSelectedFoodItem] = useState(null);
   const [selectedProvinceAdcode, setSelectedProvinceAdcode] = useState(null); // 省级行政区下钻状态
   const [viewLevel, setViewLevel] = useState('country'); // 三级下钻层级：'country', 'area', 'province'
+  const cultureThemeId = useFoodMapStore((state) => state.cultureThemeId);
   const theme = useFoodMapStore((state) => state.theme);
   const resetTheme = useFoodMapStore((state) => state.resetTheme);
+  const switchCultureTheme = useFoodMapStore((state) => state.switchCultureTheme);
   const [snapshot, send] = useMachine(mapMachine);
   const { appMode, flowStep, selectedAreaId } = snapshot.context;
   const currentArea = getAreaById(theme, selectedAreaId);
   const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
-
-  useAnimeHoverInteractions(appRef);
-  useAnimeThemeSwap(appRef, siteTheme);
+  const themeCopy = getThemeCopy(theme);
 
   // 实现多主题平滑挂载及一屏式沉浸感设计，强制不溢出滚动
   useEffect(() => {
@@ -1638,6 +1642,22 @@ function App() {
   function handleHoverArea(areaId) {
     if (!areaId || viewLevel !== 'country') return;
     setHoveredAreaId(areaId);
+  }
+
+  function handleCultureThemeSwitch(nextCultureThemeId) {
+    if (nextCultureThemeId === cultureThemeId) return;
+    const nextTheme = getCultureThemeById(nextCultureThemeId);
+    const nextAreaId = nextTheme.areas[0]?.id;
+    switchCultureTheme(nextCultureThemeId);
+    setHoveredAreaId(nextAreaId);
+    setSelectedProvinceAdcode(null);
+    setSelectedFoodItem(null);
+    setViewLevel('country');
+    if (nextAreaId) {
+      send({ areaId: nextAreaId, type: 'SET_ACTIVE_AREA' });
+    }
+    send({ type: 'BACK_COUNTRY' });
+    setNotice(CULTURE_THEME_OPTIONS.find((option) => option.id === nextCultureThemeId)?.notice || getThemeCopy(nextTheme).readyNotice);
   }
 
   function handleFoodItemSelect(item, areaId) {
@@ -1677,7 +1697,7 @@ function App() {
     setSelectedFoodItem(null);
     setViewLevel('country');
     send({ type: 'BACK_COUNTRY' });
-    setNotice('已返回全国信仰文化大盘');
+    setNotice(themeCopy.returnCountryNotice);
   }
 
   function handleBackArea() {
@@ -1693,14 +1713,14 @@ function App() {
   }, [currentArea, selectedProvinceAdcode]);
 
   return (
-    <main className={`app-shell mode-${appMode} theme-${siteTheme}`} ref={appRef}>
+    <main className={`app-shell mode-${appMode} theme-${siteTheme}`}>
       {/* 高端磨砂玻璃顶栏 */}
       <header className="topbar">
         <button className="brand" onClick={handleBackCountry} type="button">
           <div className="brand-icon-wrapper">
             <Landmark size={22} aria-hidden="true" />
           </div>
-          <span>{theme.name}</span>
+          <span>中国文化地图</span>
         </button>
         <div className="topbar-status">
           <MapPin size={14} aria-hidden="true" />
@@ -1709,25 +1729,27 @@ function App() {
               ? `已聚焦：${activeAsset ? activeAsset.title.replace('图', '') : '省份详情'}`
               : viewLevel === 'area'
               ? `已聚焦：${currentArea.name}`
-              : '中国宗教信仰版图视图'}
+              : themeCopy.countryStatus}
           </span>
         </div>
 
-        {/* 新增：前端多风格视觉主题切换器 */}
-        <div className="site-theme-switch" aria-label="视觉主题切换">
-          {SITE_THEME_OPTIONS.map((option) => (
-            <button
-              className={siteTheme === option.id ? 'is-active' : ''}
-              key={option.id}
-              onClick={() => {
-                setSiteTheme(option.id);
-                setNotice(option.notice);
-              }}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="culture-theme-switch" aria-label="文化类型切换">
+          {CULTURE_THEME_OPTIONS.map((option) => {
+            const CultureIcon = option.id === 'architecture' ? Building2 : Landmark;
+            return (
+              <button
+                className={cultureThemeId === option.id ? 'is-active' : ''}
+                key={option.id}
+                onClick={() => handleCultureThemeSwitch(option.id)}
+                style={{ '--culture-color': option.accent }}
+                type="button"
+              >
+                <CultureIcon size={15} aria-hidden="true" />
+                <span>{option.label}</span>
+                <small>{option.description}</small>
+              </button>
+            );
+          })}
         </div>
 
         <div className="mode-switch">
@@ -1754,13 +1776,13 @@ function App() {
         <div className="map-column">
           <div className="map-title-row">
             <div>
-              <span>中国宗教信仰文化区探索 ✦ React 自适应投影</span>
+              <span>{themeCopy.exploreLabel}</span>
               <h1>
                 {viewLevel === 'province'
                   ? `${activeAsset ? activeAsset.title.replace('图', '') : '省份详情'}`
                   : viewLevel === 'area'
                   ? `${currentArea.name}详情`
-                  : '六大信仰文化区总览'}
+                  : themeCopy.overviewTitle}
               </h1>
             </div>
             {viewLevel === 'area' && (
@@ -1845,13 +1867,18 @@ function App() {
             <button
               className="secondary-action btn-reset"
               onClick={() => {
+                const defaultTheme = getCultureThemeById(cultureThemeId);
+                const defaultAreaId = defaultTheme.areas[0]?.id;
                 resetTheme();
                 setSelectedProvinceAdcode(null);
                 setSelectedFoodItem(null);
-                setHoveredAreaId('north-ancestor-ritual');
+                setHoveredAreaId(defaultAreaId);
                 setViewLevel('country');
+                if (defaultAreaId) {
+                  send({ areaId: defaultAreaId, type: 'SET_ACTIVE_AREA' });
+                }
                 send({ type: 'BACK_COUNTRY' });
-                setNotice('系统成功复位：地图已恢复至默认宗教信仰文化配置');
+                setNotice(getThemeCopy(defaultTheme).resetNotice);
               }}
               type="button"
             >

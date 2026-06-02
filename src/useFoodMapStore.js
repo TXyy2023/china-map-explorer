@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEFAULT_FOOD_THEME, STORAGE_KEY, cloneTheme } from './foodMapConfig.js';
+import {
+  DEFAULT_CULTURE_THEME_ID,
+  STORAGE_KEY,
+  cloneTheme,
+  getCultureThemeById,
+} from './foodMapConfig.js';
 
 /**
  * 中华美食文化地图状态管理 Store (使用 Zustand)
@@ -9,8 +14,9 @@ import { DEFAULT_FOOD_THEME, STORAGE_KEY, cloneTheme } from './foodMapConfig.js'
 export const useFoodMapStore = create(
   persist(
     (set) => ({
+      cultureThemeId: DEFAULT_CULTURE_THEME_ID,
       // 初始化状态：深度克隆默认的中华美食主题配置
-      theme: cloneTheme(DEFAULT_FOOD_THEME),
+      theme: cloneTheme(getCultureThemeById(DEFAULT_CULTURE_THEME_ID)),
 
       // 绑定/附加 AI 图像素材到指定的文化区
       attachImageAsset: (areaId, asset) => set((state) => ({
@@ -28,7 +34,14 @@ export const useFoodMapStore = create(
       })),
 
       // 恢复/重置当前主题为最初的默认美食地图配置
-      resetTheme: () => set({ theme: cloneTheme(DEFAULT_FOOD_THEME) }),
+      resetTheme: () => set((state) => ({
+        theme: cloneTheme(getCultureThemeById(state.cultureThemeId || DEFAULT_CULTURE_THEME_ID)),
+      })),
+
+      switchCultureTheme: (cultureThemeId) => set({
+        cultureThemeId,
+        theme: cloneTheme(getCultureThemeById(cultureThemeId)),
+      }),
 
       // 局部更新指定文化区的具体配置项（如中心点坐标、颜色等）
       updateAreaConfig: (areaId, patch) => set((state) => ({
@@ -40,8 +53,7 @@ export const useFoodMapStore = create(
     }),
     {
       name: STORAGE_KEY, // localStorage 的 key 键名
-      partialize: (state) => ({ theme: state.theme }), // 仅持久化存储主题配置状态
+      partialize: (state) => ({ cultureThemeId: state.cultureThemeId, theme: state.theme }), // 仅持久化存储主题配置状态
     },
   ),
 );
-
