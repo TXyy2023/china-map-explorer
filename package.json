@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "concurrently -k -n MCP,WEB -c blue,green \"npm:dev:mcp\" \"npm:dev:web\"",
     "dev:mcp": "node server/mcp-bridge.mjs",
-    "dev:web": "vite --host 0.0.0.0 --port 5174 --strictPort",
+    "dev:web": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "build": "vite build",
-    "preview": "vite --host 0.0.0.0"
+    "preview": "vite --host 0.0.0.0 --port 3000 --strictPort"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",
