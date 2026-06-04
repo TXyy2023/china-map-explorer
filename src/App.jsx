@@ -480,6 +480,10 @@ function FoodMap({
     return version ? `${cleanSrc}?v=${version}` : cleanSrc;
   }
 
+  function getAreaFillAsset(area, zoomLevel) {
+    return area?.mapFills?.[zoomLevel] || area?.summaryAsset?.src || theme.chinaAsset?.src;
+  }
+
   function recordFoodOrigin(event) {
     const stage = mapStageRef.current;
     if (!stage || !event?.clientX || !event?.clientY) return;
@@ -690,14 +694,17 @@ function FoodMap({
             </clipPath>
           )}
 
-          {/* 大区裁切路径 */}
-          {currentArea && (
-            <clipPath id={`clip-area-${currentArea.id}`}>
-              {validFeatures.filter(geo => visibleAdcodes.has(String(geo.properties.adcode))).map((geo) => (
-                <path d={pathGenerator(geo)} key={`clip-path-area-${geo.properties.adcode}`} />
-              ))}
+          {/* 大区裁切路径：全国视图也需要逐区裁切文化纹理 */}
+          {theme.areas.map((area) => {
+            const areaAdcodes = new Set((area.provinceAdcodes || []).map(String));
+            return (
+              <clipPath id={`clip-area-${area.id}`} key={`clip-area-${area.id}`}>
+                {validFeatures.filter(geo => areaAdcodes.has(String(geo.properties.adcode))).map((geo) => (
+                  <path d={pathGenerator(geo)} key={`clip-path-area-${area.id}-${geo.properties.adcode}`} />
+                ))}
             </clipPath>
-          )}
+            );
+          })}
 
           {/* 省份单独裁切路径 */}
           {validFeatures.map((geo) => {
@@ -824,34 +831,36 @@ function FoodMap({
               }}
             </Geographies>
 
-            {/* 2. 可选图板填充层：宗教版默认关闭，保留配置能力 */}
-            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && (
+            {/* 2. AI 生成图填充层：使用 SVG clipPath 保持地图轮廓精确 */}
+            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && theme.areas.map((area) => (
               <image
                 className="map-fill-image map-fill-country"
-                href={getVersionedAsset(theme.chinaAsset?.src || '/assets/food/china-food-ai.png')}
-                key="country-food-map"
+                data-anime-opacity="0.84"
+                href={getVersionedAsset(getAreaFillAsset(area, 'country'))}
+                key={`country-map-fill-${area.id}`}
                 x={chinaBounds.x}
                 y={chinaBounds.y}
                 width={chinaBounds.w}
                 height={chinaBounds.h}
-                clipPath="url(#clip-china)"
-                preserveAspectRatio="none"
-                style={{ pointerEvents: 'none' }}
+                clipPath={`url(#clip-area-${area.id})`}
+                preserveAspectRatio="xMidYMid slice"
+                style={{ '--map-fill-opacity': 0.84, pointerEvents: 'none' }}
               />
-            )}
+            ))}
 
             {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
               <image
                 className="map-fill-image map-fill-area"
-                href={getVersionedAsset(currentArea.summaryAsset?.src)}
+                data-anime-opacity="0.9"
+                href={getVersionedAsset(getAreaFillAsset(currentArea, 'area'))}
                 key={`area-food-map-${currentArea.id}`}
                 x={areaBounds.x}
                 y={areaBounds.y}
                 width={areaBounds.w}
                 height={areaBounds.h}
                 clipPath={`url(#clip-area-${currentArea.id})`}
-                preserveAspectRatio="none"
-                style={{ pointerEvents: 'none' }}
+                preserveAspectRatio="xMidYMid slice"
+                style={{ '--map-fill-opacity': 0.9, pointerEvents: 'none' }}
               />
             )}
 
@@ -861,16 +870,16 @@ function FoodMap({
                 {theme.useImageFills !== false && areaBounds && (
                   <image
                     className="map-fill-image map-fill-area is-soft"
-                    href={getVersionedAsset(currentArea.summaryAsset?.src)}
+                    data-anime-opacity="0.22"
+                    href={getVersionedAsset(getAreaFillAsset(currentArea, 'area'))}
                     key={`area-food-map-soft-${currentArea.id}`}
                     x={areaBounds.x}
                     y={areaBounds.y}
                     width={areaBounds.w}
                     height={areaBounds.h}
                     clipPath={`url(#clip-area-${currentArea.id})`}
-                    preserveAspectRatio="none"
-                    opacity={0.18}
-                    style={{ pointerEvents: 'none' }}
+                    preserveAspectRatio="xMidYMid slice"
+                    style={{ '--map-fill-opacity': 0.22, pointerEvents: 'none' }}
                   />
                 )}
                 {/* 2.2 聚焦激活的省份以 100% 不透明度呈现省级图板 */}
@@ -882,15 +891,16 @@ function FoodMap({
                     return (
                       <image
                         className="map-fill-image map-fill-province"
-                        href={getVersionedAsset(asset ? asset.src : `/assets/food/${adcode}_contour.png`)}
+                        data-anime-opacity="0.95"
+                        href={getVersionedAsset(asset?.src || getAreaFillAsset(currentArea, 'province') || `/assets/food/${adcode}_contour.png`)}
                         key={`province-food-map-${adcode}`}
                         x={bounds.x}
                         y={bounds.y}
                         width={bounds.w}
                         height={bounds.h}
                         clipPath={`url(#clip-province-${adcode})`}
-                        preserveAspectRatio="none"
-                        style={{ pointerEvents: 'none' }}
+                        preserveAspectRatio="xMidYMid slice"
+                        style={{ '--map-fill-opacity': 0.95, pointerEvents: 'none' }}
                       />
                     );
                   }
@@ -898,6 +908,23 @@ function FoodMap({
                 })()}
               </>
             )}
+
+            <g className={`map-boundary-layer boundaries-${viewLevel}`} pointerEvents="none">
+              {validFeatures.map((geo) => {
+                const adcode = String(geo.properties.adcode);
+                const isInFocusedArea = currentArea && visibleAdcodes.has(adcode);
+                const isActiveProvince = viewLevel === 'province' && String(selectedProvinceAdcode) === adcode;
+                const shouldShow = viewLevel === 'country' || isInFocusedArea || isActiveProvince;
+                if (!shouldShow) return null;
+                return (
+                  <path
+                    d={pathGenerator(geo)}
+                    key={`map-boundary-${adcode}`}
+                    style={{ '--boundary-color': provinceAreaMap.get(adcode)?.color || currentArea?.color || '#d4af37' }}
+                  />
+                );
+              })}
+            </g>
 
             <g className={`province-label-layer labels-${viewLevel}`} pointerEvents="none">
               {provinceLabelItems.map((item) => {
@@ -955,11 +982,28 @@ function FoodMap({
                 type="button"
               >
               <span className="food-float-content">
-                  <span className="culture-symbol" aria-hidden="true">{item.symbol || item.name.slice(0, 1)}</span>
+                  {item.image ? (
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      src={getVersionedAsset(item.image)}
+                      style={{ objectPosition: item.objectPosition || '50% 50%' }}
+                    />
+                  ) : (
+                    <span className="culture-symbol" aria-hidden="true">{item.symbol || item.name.slice(0, 1)}</span>
+                  )}
                   <span className="food-float-label">{item.name}</span>
                 </span>
                 <span className="food-float-ghost" aria-hidden="true">
-                  <span className="culture-symbol">{item.symbol || item.name.slice(0, 1)}</span>
+                  {item.image ? (
+                    <img
+                      alt=""
+                      src={getVersionedAsset(item.image)}
+                      style={{ objectPosition: item.objectPosition || '50% 50%' }}
+                    />
+                  ) : (
+                    <span className="culture-symbol">{item.symbol || item.name.slice(0, 1)}</span>
+                  )}
                   <span className="food-float-label">{item.name}</span>
                 </span>
               </button>
@@ -1141,14 +1185,31 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
           style={{ '--food-accent': selectedFoodItem.accent || currentArea?.color || '#d4af37' }}
         >
           <div className="food-process-head">
-            <div className="culture-symbol process-symbol" aria-hidden="true">
-              {selectedFoodItem.symbol || selectedFoodItem.name.slice(0, 1)}
-            </div>
+            {selectedFoodItem.image ? (
+              <img
+                alt={`${selectedFoodItem.name}信息图缩略图`}
+                src={versionedImage(selectedFoodItem.image)}
+                style={{ objectPosition: selectedFoodItem.objectPosition || '50% 50%' }}
+              />
+            ) : (
+              <div className="culture-symbol process-symbol" aria-hidden="true">
+                {selectedFoodItem.symbol || selectedFoodItem.name.slice(0, 1)}
+              </div>
+            )}
             <div>
               <span>{selectedFoodItem.areaName || currentArea?.name}</span>
               <strong>{selectedFoodItem.name}</strong>
             </div>
           </div>
+          {(selectedFoodItem.detailImage || selectedFoodItem.image) && (
+            <figure className="process-infographic">
+              <img
+                alt={`${selectedFoodItem.name}信息图讲解`}
+                src={versionedImage(selectedFoodItem.detailImage || selectedFoodItem.image)}
+                style={{ objectPosition: selectedFoodItem.objectPosition || '50% 50%' }}
+              />
+            </figure>
+          )}
           <div className="process-sketch-grid">
             {selectedFoodItem.process.map((step, index) => (
               <article className="process-sketch-step" key={`${selectedFoodItem.id}-step-${index}`}>

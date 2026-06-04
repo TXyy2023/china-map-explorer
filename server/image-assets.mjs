@@ -4,6 +4,7 @@ import { basename, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { DEFAULT_FOOD_THEME } from '../src/foodMapConfig.js';
+import { getOpenAiApiBaseUrl } from './openai-url.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -208,10 +209,6 @@ function patchAssetForGeneration(asset, patch = {}) {
   };
 }
 
-function getImageApiBaseUrl() {
-  return (process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/+$/, '');
-}
-
 async function callImageEditApi(asset) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -229,7 +226,8 @@ async function callImageEditApi(asset) {
   form.append('output_format', 'png');
   form.append('image', new Blob([bytes], { type: 'image/png' }), basename(inputPath));
 
-  const response = await fetch(`${getImageApiBaseUrl()}/images/edits`, {
+  const imageEditUrl = `${getOpenAiApiBaseUrl()}/images/edits`;
+  const response = await fetch(imageEditUrl, {
     body: form,
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -239,7 +237,7 @@ async function callImageEditApi(asset) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error?.message || payload.error || `图片生成 API 调用失败：${response.status}`);
+    throw new Error(payload.error?.message || payload.error || `图片生成 API 调用失败：${response.status} ${response.statusText} (${imageEditUrl})`);
   }
 
   const imageBase64 = payload.data?.[0]?.b64_json;

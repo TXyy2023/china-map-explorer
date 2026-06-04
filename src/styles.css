@@ -431,6 +431,25 @@ html.theme-market-night, body.theme-market-night {
   animation-duration: 0.46s;
 }
 
+.map-boundary-layer path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--boundary-color) 70%, #ffffff 30%);
+  stroke-linejoin: round;
+  stroke-opacity: 0.76;
+  stroke-width: 1.15px;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+.map-boundary-layer.boundaries-area path {
+  stroke-opacity: 0.9;
+  stroke-width: 1.4px;
+}
+
+.map-boundary-layer.boundaries-province path {
+  stroke-opacity: 0.82;
+}
+
 @keyframes mapFillReveal {
   0% {
     opacity: 0;
@@ -441,11 +460,11 @@ html.theme-market-night, body.theme-market-night {
       drop-shadow(0 0 0 rgba(var(--accent-rgb), 0));
   }
   65% {
-    opacity: 1;
+    opacity: var(--map-fill-opacity, 1);
     transform: scale(1.018);
   }
   100% {
-    opacity: 1;
+    opacity: var(--map-fill-opacity, 1);
     transform: scale(1);
     filter:
       drop-shadow(0 10px 20px rgba(0, 0, 0, 0.28))
@@ -976,6 +995,22 @@ html.theme-market-night, body.theme-market-night {
 
 .process-symbol {
   --food-size: 58px;
+}
+
+.process-infographic {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.process-infographic img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
 }
 
 .food-process-head span {

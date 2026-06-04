@@ -8,6 +8,8 @@
     "dev:mcp": "node server/mcp-bridge.mjs",
     "dev:web": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "build": "vite build",
+    "generate:culture-images": "node scripts/generate-culture-images.mjs",
+    "optimize:culture-images": "node scripts/optimize-culture-images.mjs",
     "preview": "vite --host 0.0.0.0 --port 3000 --strictPort"
   },
   "dependencies": {
@@ -29,5 +31,8 @@
     "xstate": "^5.32.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

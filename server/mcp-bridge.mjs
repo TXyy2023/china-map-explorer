@@ -13,6 +13,7 @@ import {
   regenerateImageAssets,
   updateImageAsset,
 } from './image-assets.mjs';
+import { getOpenAiApiBaseUrl } from './openai-url.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataPath = resolve(__dirname, 'data/food-map-config.json');
@@ -228,7 +229,7 @@ app.get('/api/assets', async (c) => {
     return c.json({
       assets,
       settings: {
-        apiBaseUrl: process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || 'https://api.openai.com/v1',
+        apiBaseUrl: getOpenAiApiBaseUrl(),
         model: process.env.IMAGE_GEN_MODEL || 'gpt-image-2',
         quality: process.env.IMAGE_GEN_QUALITY || 'high',
         size: process.env.IMAGE_GEN_SIZE || 'auto',

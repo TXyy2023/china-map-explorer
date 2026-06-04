@@ -5,7 +5,7 @@
  * foodItems 等字段名；页面展示内容已经切换为宗教信仰文化主题。
  */
 
-export const STORAGE_KEY = 'agy-china-culture-map-v2';
+export const STORAGE_KEY = 'agy-china-culture-map-v3';
 
 const BOARD = {
   bashu: '/assets/religion/boards/04-bashu-local-gods-buddhist-daoist.png',
@@ -15,6 +15,28 @@ const BOARD = {
   northwest: '/assets/religion/boards/05-northwest-islamic-silk-road-oasis.png',
   tibet: '/assets/religion/boards/06-qinghai-tibet-tibetan-buddhism.png',
 };
+
+const GENERATED_CULTURE_ASSET_ROOT = '/assets/generated-culture';
+
+const generatedCultureImage = (themeId, folder, name) => `${GENERATED_CULTURE_ASSET_ROOT}/${themeId}/${folder}/${name}.webp`;
+
+const getGeneratedThemeId = (areaId) => (String(areaId).startsWith('architecture-') ? 'architecture' : 'religion');
+
+const generatedItemImage = (areaId, itemId) => (
+  generatedCultureImage(getGeneratedThemeId(areaId), 'items', itemId)
+);
+
+const generatedMapFill = (areaId, zoomLevel) => (
+  generatedCultureImage(getGeneratedThemeId(areaId), 'map', `${areaId}-${zoomLevel}`)
+);
+
+const generatedMapFills = (areaId) => ({
+  area: generatedMapFill(areaId, 'area'),
+  country: generatedMapFill(areaId, 'country'),
+  province: generatedMapFill(areaId, 'province'),
+});
+
+const generatedCountryOverview = (themeId) => generatedCultureImage(themeId, 'map', 'country-overview');
 
 const QUIZ = {
   bashu: {
@@ -68,7 +90,7 @@ const makeAsset = (areaId, src, item, quiz) => ({
   provinceAdcode: item.provinceAdcode,
   quiz,
   size: { height: 130, width: 180 },
-  src,
+  src: generatedMapFill(areaId, 'province') || src,
   title: item.title,
   type: 'image',
 });
@@ -77,12 +99,41 @@ const makeAssets = (areaId, src, items, quiz) => items.map((item) => makeAsset(a
 
 const makeSignal = (areaId, src, provinceAdcode, id, name, process) => ({
   accent: undefined,
+  detailImage: generatedItemImage(areaId, id),
+  fallbackImage: src,
   id,
-  image: src,
+  image: generatedItemImage(areaId, id),
   name,
   objectPosition: '50% 50%',
   process,
   provinceAdcode,
+});
+
+const makeGeneratedSummaryAsset = (themeId, area) => ({
+  coordinates: area.summaryAsset?.coordinates || area.center,
+  id: area.summaryAsset?.id || `summary-${area.id}`,
+  size: area.summaryAsset?.size || { height: 160, width: 220 },
+  src: generatedMapFill(area.id, 'area'),
+  title: area.summaryAsset?.title || `${area.name}信息图板`,
+  type: area.summaryAsset?.type || 'image',
+});
+
+const applyGeneratedCultureImages = (theme, themeId) => ({
+  ...theme,
+  chinaAsset: {
+    ...(theme.chinaAsset || {}),
+    src: generatedCountryOverview(themeId),
+  },
+  useImageFills: true,
+  areas: theme.areas.map((area) => ({
+    ...area,
+    assets: (area.assets || []).map((asset) => ({
+      ...asset,
+      src: generatedMapFill(area.id, 'province'),
+    })),
+    mapFills: generatedMapFills(area.id),
+    summaryAsset: makeGeneratedSummaryAsset(themeId, area),
+  })),
 });
 
 export const FOOD_IMAGE_ASSET = {
@@ -95,7 +146,7 @@ export const FOOD_IMAGE_ASSET = {
   type: 'image',
 };
 
-export const DEFAULT_FOOD_THEME = {
+const BASE_FOOD_THEME = {
   chinaAsset: {
     id: 'china-religion-summary',
     src: BOARD.north,
@@ -374,7 +425,7 @@ const ARCHITECTURE_QUIZ = {
   },
 };
 
-export const ARCHITECTURE_CULTURE_THEME = {
+const BASE_ARCHITECTURE_CULTURE_THEME = {
   chinaAsset: {
     id: 'china-architecture-summary',
     src: ARCHITECTURE_PLACEHOLDER,
@@ -608,6 +659,10 @@ export const ARCHITECTURE_CULTURE_THEME = {
     },
   ],
 };
+
+export const DEFAULT_FOOD_THEME = applyGeneratedCultureImages(BASE_FOOD_THEME, 'religion');
+
+export const ARCHITECTURE_CULTURE_THEME = applyGeneratedCultureImages(BASE_ARCHITECTURE_CULTURE_THEME, 'architecture');
 
 export const DEFAULT_CULTURE_THEME_ID = 'religion';
 
