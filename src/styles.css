@@ -492,51 +492,12 @@ html.theme-market-night, body.theme-market-night {
   filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 15px rgba(var(--accent-rgb), 0.45));
 }
 
+.province.is-hover-preview {
+  filter: drop-shadow(0 0 18px rgba(212, 175, 55, 0.82)) drop-shadow(0 8px 20px rgba(0, 0, 0, 0.45));
+}
+
 .province.is-active-province {
   filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.9)) !important;
-}
-
-.province-label-layer {
-  user-select: none;
-}
-
-.province-label-text {
-  fill: rgba(248, 250, 252, 0.96);
-  stroke: rgba(5, 10, 16, 0.82);
-  stroke-width: 3.8px;
-  paint-order: stroke;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0;
-  vector-effect: non-scaling-stroke;
-}
-
-.province-label.has-area .province-label-text {
-  fill: color-mix(in srgb, var(--province-color) 22%, #ffffff 78%);
-}
-
-.province-label.is-muted .province-label-text {
-  fill: rgba(148, 163, 184, 0.62);
-  stroke: rgba(5, 10, 16, 0.68);
-}
-
-.province-label.is-active .province-label-text {
-  fill: #fff6cc;
-  stroke: rgba(5, 10, 16, 0.9);
-  stroke-width: 4.4px;
-}
-
-.province-label.is-tiny .province-label-text {
-  font-size: 8.5px;
-}
-
-.province-label-layer.labels-area .province-label-text {
-  font-size: 13px;
-}
-
-.province-label-layer.labels-province .province-label-text {
-  font-size: 13px;
 }
 
 .food-orbit-layer {

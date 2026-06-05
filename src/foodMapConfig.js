@@ -20,7 +20,12 @@ const GENERATED_CULTURE_ASSET_ROOT = '/assets/generated-culture';
 
 const generatedCultureImage = (themeId, folder, name) => `${GENERATED_CULTURE_ASSET_ROOT}/${themeId}/${folder}/${name}.webp`;
 
-const getGeneratedThemeId = (areaId) => (String(areaId).startsWith('architecture-') ? 'architecture' : 'religion');
+const getGeneratedThemeId = (areaId) => {
+  const id = String(areaId);
+  if (id.startsWith('architecture-')) return 'architecture';
+  if (id.startsWith('clothing-')) return 'clothing';
+  return 'religion';
+};
 
 const generatedItemImage = (areaId, itemId) => (
   generatedCultureImage(getGeneratedThemeId(areaId), 'items', itemId)
@@ -660,9 +665,225 @@ const BASE_ARCHITECTURE_CULTURE_THEME = {
   ],
 };
 
+const CLOTHING_PLACEHOLDER = '/assets/food/china_contour.png';
+
+const CLOTHING_QUIZ = {
+  jiangnanSilk: {
+    answerIndex: 0,
+    options: ['A. 丝绸织造与精细刺绣', 'B. 厚毡靴帽', 'C. 高原氆氇袍', 'D. 海神庙会服饰'],
+    question: '江南丝绸服饰文化区最突出的工艺基础是什么？',
+    successReward: '已点亮“江南丝绸织绣”服饰线索。',
+  },
+  northRitual: {
+    answerIndex: 2,
+    options: ['A. 海岛棉麻', 'B. 苗银盛装', 'C. 礼制袍服与寒地袍褂', 'D. 藏式氆氇'],
+    question: '北方礼制服饰区常同时体现哪两类需求？',
+    successReward: '已点亮“北方礼制与寒地服饰”线索。',
+  },
+  northwestSilkRoad: {
+    answerIndex: 1,
+    options: ['A. 水乡旗袍', 'B. 丝路织锦、毡靴与回族绣饰', 'C. 蜡染银饰', 'D. 岭南骑楼长衫'],
+    question: '西北丝路服饰区最容易被识别的复合来源是什么？',
+    successReward: '已点亮“西北丝路服饰”线索。',
+  },
+  southeastMaritime: {
+    answerIndex: 3,
+    options: ['A. 藏袍腰带', 'B. 关中袍服', 'C. 羌绣披肩', 'D. 闽粤海洋贸易与侨乡织绣'],
+    question: '东南闽粤岭南服饰为何常呈现开放混合的视觉特征？',
+    successReward: '已点亮“东南海洋织绣”线索。',
+  },
+  southwestEthnic: {
+    answerIndex: 0,
+    options: ['A. 银饰、蜡染、织锦与节庆盛装', 'B. 宫廷补服', 'C. 海派旗袍', 'D. 回族小帽'],
+    question: '西南多民族服饰区最具展示性的视觉组合是什么？',
+    successReward: '已点亮“西南多民族盛装”线索。',
+  },
+  tibetanPlateau: {
+    answerIndex: 2,
+    options: ['A. 水网丝绸', 'B. 闽南红砖纹样', 'C. 藏袍、氆氇与绿松石饰件', 'D. 海派盘扣'],
+    question: '青藏高原服饰最典型的材料和配饰组合是什么？',
+    successReward: '已点亮“青藏高原藏式服饰”线索。',
+  },
+};
+
+const BASE_CLOTHING_CULTURE_THEME = {
+  chinaAsset: {
+    id: 'china-clothing-summary',
+    src: CLOTHING_PLACEHOLDER,
+  },
+  cultureType: 'clothing',
+  moduleId: 'clothing',
+  copy: {
+    areaCountLabel: '服饰文化区',
+    areaDetailLabel: '服饰文化区详情',
+    countryKicker: '中国服饰文化版图',
+    countryStatus: '中国服饰文化版图视图',
+    exploreLabel: '中国服饰文化区探索 ✦ React 自适应投影',
+    loadingLabel: '文化地图加载中...',
+    overviewTitle: '六大服饰文化区总览',
+    provinceDescription: '探索省级服饰文化线索。',
+    provinceLabel: '省级服饰线索',
+    quizLabel: '服饰区知识问答',
+    readyNotice: '服饰文化地图已就绪，等待探索',
+    resetNotice: '系统成功复位：地图已恢复至默认服饰文化配置',
+    returnCountryNotice: '已返回全国服饰文化大盘',
+    targetAreaLabel: '目标服饰文化区',
+  },
+  description: '以中国省级地图为底盘，展示六类服饰文化区：北方礼制与寒地袍服、江南丝绸织绣、东南闽粤岭南海洋织绣、西南多民族盛装、西北丝路毡绣与青藏高原藏式服饰。',
+  id: 'chinese-clothing-culture-map',
+  name: '中国服饰文化地图',
+  useImageFills: false,
+  areas: [
+    {
+      center: [114.0, 39.0],
+      color: '#c86f49',
+      description: '北方礼制与寒地袍服区连接都城礼仪、家族节令与寒地生活，袍褂、云肩、盘扣、皮毛边饰和厚棉衣共同构成稳重的北方服饰气质。',
+      id: 'clothing-north-ritual',
+      name: '北方礼制与寒地袍服区',
+      provinceAdcodes: ['110000', '120000', '130000', '140000', '150000', '210000', '220000', '230000', '370000', '410000', '610000'],
+      zoom: 3.7,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-north-ritual', CLOTHING_PLACEHOLDER, '110000', 'cloth-court-robe', '礼制袍服', ['袍服形制强调等级、礼序与场合。', '盘扣、立领和宽袖形成清晰轮廓。', '适合在地图中作为北方服饰主线索。', '可连接都城礼仪与家族节令。']),
+        makeSignal('clothing-north-ritual', CLOTHING_PLACEHOLDER, '220000', 'cloth-padded-robe', '寒地袍褂', ['厚棉、皮毛和叠穿回应寒冷气候。', '宽松结构便于保暖和行动。', '东北寒地生活让服装更重防护性。', '适合做气候适应说明。']),
+        makeSignal('clothing-north-ritual', CLOTHING_PLACEHOLDER, '370000', 'cloth-cloud-collar', '云肩纹样', ['云肩与刺绣承载吉祥寓意。', '礼仪、婚嫁和节庆场景常出现装饰层。', '纹样把地域审美转化为可视符号。', '适合做纹样热点。']),
+      ],
+      assets: makeAssets('clothing-north-ritual', CLOTHING_PLACEHOLDER, [
+        province('110000', '北京礼制袍服线索图', [116.4, 40.0]),
+        province('120000', '天津近代袍褂线索图', [117.2, 39.1]),
+        province('130000', '河北节令服饰线索图', [115.1, 38.5]),
+        province('140000', '山西晋地云肩纹样线索图', [112.5, 37.7]),
+        province('150000', '内蒙古毡帽袍服线索图', [111.8, 43.8]),
+        province('210000', '辽宁寒地袍褂线索图', [123.4, 41.8]),
+        province('220000', '吉林皮毛棉衣线索图', [126.0, 43.8]),
+        province('230000', '黑龙江寒地防护服饰线索图', [128.0, 47.2]),
+        province('370000', '山东礼俗织绣线索图', [118.2, 36.4]),
+        province('410000', '河南中原礼俗服饰线索图', [113.7, 34.4]),
+        province('610000', '陕西关中袍服线索图', [108.8, 35.8]),
+      ], CLOTHING_QUIZ.northRitual),
+      quiz: CLOTHING_QUIZ.northRitual,
+    },
+    {
+      center: [119.0, 31.2],
+      color: '#2f9f9a',
+      description: '江南丝绸织绣区依托水网城镇、丝织业和精细工艺，形成丝绸、缂丝、苏绣、旗袍、徽派纹样和雅致日常服饰的复合谱系。',
+      id: 'clothing-jiangnan-silk',
+      name: '江南丝绸织绣与海派服饰区',
+      provinceAdcodes: ['310000', '320000', '330000', '340000'],
+      zoom: 4.5,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-jiangnan-silk', CLOTHING_PLACEHOLDER, '320000', 'cloth-silk-weave', '丝绸织造', ['丝绸织造奠定轻薄、细腻的材料基础。', '水网市镇与手工业推动纹样迭代。', '适合作为江南服饰主线索。', '可连接苏绣、缂丝和成衣。']),
+        makeSignal('clothing-jiangnan-silk', CLOTHING_PLACEHOLDER, '310000', 'cloth-haipai-qipao', '海派旗袍', ['近代都市审美改变服装剪裁。', '盘扣、滚边和修身线条形成识别。', '海派服饰体现传统与现代的转换。', '适合做城市服饰热点。']),
+        makeSignal('clothing-jiangnan-silk', CLOTHING_PLACEHOLDER, '340000', 'cloth-hui-embroidery', '徽派纹样', ['徽州纹样常与家族礼俗、厅堂审美连接。', '刺绣和织纹体现细密装饰趣味。', '白墙黛瓦环境影响服饰色彩想象。', '适合做纹样信息卡。']),
+      ],
+      assets: makeAssets('clothing-jiangnan-silk', CLOTHING_PLACEHOLDER, [
+        province('310000', '上海海派旗袍线索图', [121.45, 31.2]),
+        province('320000', '江苏苏绣丝绸线索图', [119.3, 32.7]),
+        province('330000', '浙江丝绸织造线索图', [120.1, 29.2]),
+        province('340000', '安徽徽派纹样线索图', [117.2, 31.8]),
+      ], CLOTHING_QUIZ.jiangnanSilk),
+      quiz: CLOTHING_QUIZ.jiangnanSilk,
+    },
+    {
+      center: [116.5, 23.8],
+      color: '#d35f8f',
+      description: '东南闽粤岭南海洋织绣区受海贸、侨乡、宗族礼俗和湿热气候影响，红黑织绣、香云纱、广绣、海岛棉麻与中西混合剪裁并置。',
+      id: 'clothing-southeast-maritime',
+      name: '东南闽粤岭南海洋织绣区',
+      provinceAdcodes: ['350000', '440000', '460000', '710000', '810000', '820000'],
+      zoom: 4.3,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-southeast-maritime', CLOTHING_PLACEHOLDER, '350000', 'cloth-min-embroidery', '闽系织绣', ['闽系织绣与宗族礼俗、庙会节庆紧密相关。', '高饱和色彩和纹样边饰形成强识别。', '海峡交流让服饰语言跨区域流动。', '适合作为闽台线索。']),
+        makeSignal('clothing-southeast-maritime', CLOTHING_PLACEHOLDER, '440000', 'cloth-lingnan-gauze', '香云纱广绣', ['香云纱回应岭南湿热环境。', '广绣强调细密针法和华丽色彩。', '侨乡网络带来开放混合的审美。', '适合做材质工艺热点。']),
+        makeSignal('clothing-southeast-maritime', CLOTHING_PLACEHOLDER, '460000', 'cloth-island-cotton', '海岛棉麻', ['轻薄棉麻适应海岛气候。', '服饰与渔业、迁徙和节庆活动相连。', '热带色彩让纹样更明亮。', '适合做气候适应说明。']),
+      ],
+      assets: makeAssets('clothing-southeast-maritime', CLOTHING_PLACEHOLDER, [
+        province('350000', '福建闽系织绣线索图', [118.2, 26.2]),
+        province('440000', '广东香云纱广绣线索图', [113.3, 23.35]),
+        province('460000', '海南海岛棉麻线索图', [110.3, 19.2]),
+        province('710000', '台湾闽台礼俗服饰线索图', [121.0, 23.7]),
+        province('810000', '香港海派中西服饰线索图', [114.18, 22.34]),
+        province('820000', '澳门中西混合服饰线索图', [113.56, 22.18]),
+      ], CLOTHING_QUIZ.southeastMaritime),
+      quiz: CLOTHING_QUIZ.southeastMaritime,
+    },
+    {
+      center: [108.0, 27.0],
+      color: '#6ba65d',
+      description: '西南多民族银饰蜡染区以山地村寨、多民族节庆和手工艺传承为核心，苗银、蜡染、织锦、挑花、羌绣和彝绣共同构成高密度视觉系统。',
+      id: 'clothing-southwest-ethnic',
+      name: '西南多民族银饰蜡染区',
+      provinceAdcodes: ['360000', '420000', '430000', '450000', '500000', '510000', '520000', '530000'],
+      zoom: 4.1,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-southwest-ethnic', CLOTHING_PLACEHOLDER, '520000', 'cloth-miao-silver', '苗银盛装', ['银饰在节庆和仪式中形成强视觉中心。', '头饰、胸饰和衣片共同表达身份。', '金属光泽适合做地图高亮图像。', '可作为西南服饰主热点。']),
+        makeSignal('clothing-southwest-ethnic', CLOTHING_PLACEHOLDER, '530000', 'cloth-batik', '蜡染织锦', ['蜡染用蓝白对比构成鲜明纹样。', '织锦和挑花记录族群记忆。', '图案常连接山水、祖先和日常生活。', '适合做纹样工艺说明。']),
+        makeSignal('clothing-southwest-ethnic', CLOTHING_PLACEHOLDER, '510000', 'cloth-qiang-yi', '羌绣彝绣', ['羌绣、彝绣重视色块和几何纹样。', '披肩、腰带和头饰回应山地生活。', '川渝边地让多种服饰系统交汇。', '适合做山地服饰线索。']),
+      ],
+      assets: makeAssets('clothing-southwest-ethnic', CLOTHING_PLACEHOLDER, [
+        province('360000', '江西赣南挑花线索图', [115.8, 27.7]),
+        province('420000', '湖北土家织锦线索图', [112.5, 30.8]),
+        province('430000', '湖南苗瑶织绣线索图', [111.8, 27.6]),
+        province('450000', '广西壮锦瑶绣线索图', [108.5, 23.7]),
+        province('500000', '重庆山地织绣线索图', [107.45, 30.0]),
+        province('510000', '四川羌绣彝绣线索图', [102.8, 30.2]),
+        province('520000', '贵州苗银蜡染线索图', [106.7, 26.6]),
+        province('530000', '云南多民族织锦线索图', [101.5, 24.5]),
+      ], CLOTHING_QUIZ.southwestEthnic),
+      quiz: CLOTHING_QUIZ.southwestEthnic,
+    },
+    {
+      center: [91.5, 40.5],
+      color: '#8f77c9',
+      description: '西北丝路毡绣区受绿洲贸易、游牧生活和多民族交流影响，艾德莱斯绸、毡帽毡靴、回族绣饰、几何纹样和长袍腰带构成主识别。',
+      id: 'clothing-northwest-silk-road',
+      name: '西北丝路毡绣服饰区',
+      provinceAdcodes: ['620000', '640000', '650000'],
+      zoom: 3.2,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-northwest-silk-road', CLOTHING_PLACEHOLDER, '650000', 'cloth-atlas-silk', '艾德莱斯绸', ['丝路交流塑造鲜明的彩条织物。', '绿洲市集让纹样和材料持续流动。', '色彩节奏适合作为地图纹理。', '可作为新疆主热点。']),
+        makeSignal('clothing-northwest-silk-road', CLOTHING_PLACEHOLDER, '620000', 'cloth-felt-boots', '毡帽毡靴', ['毡制品回应干旱、风沙和温差。', '帽靴和长袍形成完整防护系统。', '游牧与绿洲生活共同影响造型。', '适合做气候适应线索。']),
+        makeSignal('clothing-northwest-silk-road', CLOTHING_PLACEHOLDER, '640000', 'cloth-hui-cap-embroidery', '回族绣饰', ['回族服饰强调简洁、洁净和局部装饰。', '小帽、围巾和绣饰形成日常识别。', '几何纹样适合转化为 UI 图案。', '适合做纹样卡片。']),
+      ],
+      assets: makeAssets('clothing-northwest-silk-road', CLOTHING_PLACEHOLDER, [
+        province('620000', '甘肃丝路毡绣线索图', [100.9, 38.1]),
+        province('640000', '宁夏回族绣饰线索图', [106.15, 37.35]),
+        province('650000', '新疆艾德莱斯绸线索图', [84.6, 42.5]),
+      ], CLOTHING_QUIZ.northwestSilkRoad),
+      quiz: CLOTHING_QUIZ.northwestSilkRoad,
+    },
+    {
+      center: [91.0, 33.5],
+      color: '#6695bf',
+      description: '青藏高原藏式服饰区回应高寒、强日照和游牧生活，藏袍、氆氇、围裙、腰带、绿松石饰件与靴帽系统共同构成高原服饰景观。',
+      id: 'clothing-tibetan-plateau',
+      name: '青藏高原藏式服饰区',
+      provinceAdcodes: ['540000', '630000'],
+      zoom: 3.6,
+      summaryAsset: null,
+      foodItems: [
+        makeSignal('clothing-tibetan-plateau', CLOTHING_PLACEHOLDER, '540000', 'cloth-chuba', '藏袍结构', ['藏袍适合昼夜温差和游牧活动。', '腰带、袖部和叠穿方式形成可调节结构。', '服装与高原生活节律紧密相关。', '适合作为主热点。']),
+        makeSignal('clothing-tibetan-plateau', CLOTHING_PLACEHOLDER, '630000', 'cloth-pulu', '氆氇织物', ['氆氇提供保暖和耐用的材料基础。', '织物色彩和纹理连接地域身份。', '适合在地图块中表现材料质感。', '可作为工艺说明。']),
+        makeSignal('clothing-tibetan-plateau', CLOTHING_PLACEHOLDER, '540000', 'cloth-turquoise', '绿松石饰件', ['绿松石、珊瑚和金属饰件具有强装饰性。', '配饰在节庆和礼仪中强化身份表达。', '高原色彩适合做视觉记忆点。', '适合做详情图板。']),
+      ],
+      assets: makeAssets('clothing-tibetan-plateau', CLOTHING_PLACEHOLDER, [
+        province('540000', '西藏藏袍氆氇线索图', [88.6, 31.9]),
+        province('630000', '青海藏式饰件线索图', [96.4, 35.4]),
+      ], CLOTHING_QUIZ.tibetanPlateau),
+      quiz: CLOTHING_QUIZ.tibetanPlateau,
+    },
+  ],
+};
+
 export const DEFAULT_FOOD_THEME = applyGeneratedCultureImages(BASE_FOOD_THEME, 'religion');
 
 export const ARCHITECTURE_CULTURE_THEME = applyGeneratedCultureImages(BASE_ARCHITECTURE_CULTURE_THEME, 'architecture');
+
+export const CLOTHING_CULTURE_THEME = applyGeneratedCultureImages(BASE_CLOTHING_CULTURE_THEME, 'clothing');
 
 export const DEFAULT_CULTURE_THEME_ID = 'religion';
 
@@ -681,10 +902,18 @@ export const CULTURE_THEME_OPTIONS = [
     label: '建筑',
     notice: '已切换至建筑文化地图',
   },
+  {
+    accent: '#d35f8f',
+    description: '六大服饰文化区',
+    id: 'clothing',
+    label: '服饰',
+    notice: '已切换至服饰文化地图',
+  },
 ];
 
 export const CULTURE_THEMES = {
   architecture: ARCHITECTURE_CULTURE_THEME,
+  clothing: CLOTHING_CULTURE_THEME,
   religion: DEFAULT_FOOD_THEME,
 };
 

@@ -3,7 +3,7 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { DEFAULT_FOOD_THEME } from '../src/foodMapConfig.js';
+import { CULTURE_THEMES } from '../src/foodMapConfig.js';
 import { getOpenAiApiBaseUrl } from './openai-url.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -62,64 +62,120 @@ function publicToFilePath(publicPath) {
 function sourcePathFor(publicPath) {
   const clean = stripQuery(publicPath);
   const stem = basename(clean, extname(clean));
+  if (clean.startsWith('/assets/generated-culture/')) {
+    const [, , , themeId] = clean.split('/');
+    return `/assets/generated-culture/${themeId}/sources/${stem}-source.png`;
+  }
   return `/assets/food/generated-sources/${stem}-source.png`;
 }
 
 function promptForAsset(asset) {
-  const subject = asset.kind === 'province'
-    ? `${asset.title}，${provinceNames[asset.provinceAdcode] || asset.provinceAdcode}地方美食与地貌`
-    : `${asset.title}，${asset.name || asset.title}地域美食总览`;
+  if (asset.inputImage) {
+    const subject = asset.kind === 'province'
+      ? `${asset.title}，${provinceNames[asset.provinceAdcode] || asset.provinceAdcode}地方文化与地貌`
+      : `${asset.title}，${asset.name || asset.title}地域文化总览`;
+
+    return [
+      'Use case: precise-object-edit',
+      'Asset type: source image for contour-clipped interactive Chinese culture map block',
+      `Edit target: the provided input image is the exact ${asset.title} map contour. It is the mandatory geometry, canvas, scale, rotation, position, padding, coastline, holes, and island placement.`,
+      `Primary request: keep the map silhouette exactly where it is and fill only the green contour interior with ${subject}.`,
+      'Strict geometry rules: do not redraw, simplify, expand, shrink, rotate, recenter, crop, or invent the map outline. Do not add new land shapes. Do not remove small islands.',
+      'Composition/framing: artwork must fill the entire contour interior, including narrow coastal areas and islands.',
+      'Style/medium: high-quality polished guofeng cultural illustration, crisp symbolic objects, premium competition demo asset, bright inspectable lighting.',
+      'Background/outside contour: keep everything outside the contour flat, clean, and visually removable.',
+      'Constraints: no UI, no buttons, no watermark, no logos, no people portraits, no readable text or map labels.',
+    ].join('\n');
+  }
+
+  if (asset.kind === 'item') {
+    const process = (asset.process || []).join('；');
+    return [
+      'Use case: infographic-diagram',
+      `Asset type: hotspot thumbnail and detail card for ${asset.themeName}`,
+      `Primary request: Create a polished visual explanation card for "${asset.title}" in "${asset.areaName}".`,
+      `Cultural context: ${asset.areaDescription}`,
+      `Key ideas to visualize as symbolic scenes, not text: ${process}`,
+      'Composition: 16:10 educational infographic card, clear central subject, 3-4 small visual panels or icon clusters, high contrast at thumbnail size.',
+      'Style: refined Chinese cultural illustration, museum-exhibit polish, accurate cultural atmosphere, crisp details, warm practical lighting.',
+      'Constraints: no readable text, no captions, no logos, no watermark, no UI widgets, no people portraits, no fake map labels.',
+    ].join('\n');
+  }
+
+  const zoomText = {
+    area: 'medium zoom area fill with balanced cultural symbol clusters',
+    country: 'far zoom national overview texture with bold regional silhouettes',
+    province: 'close zoom province fill with denser material detail and layered motifs',
+  }[asset.level] || 'culture map fill';
 
   return [
-    'Use case: precise-object-edit',
-    'Asset type: source image for contour-clipped interactive Chinese food map block',
-    `Edit target: the provided input image is the exact ${asset.title} map contour. It is not a loose style reference; it is the mandatory geometry, canvas, scale, rotation, position, padding, coastline, holes, and island placement.`,
-    `Primary request: keep the map silhouette exactly where it is and fill only the green contour interior with ${subject}. Convert the pale green interior into detailed food-and-landscape artwork while preserving the outer border and every small island position.`,
-    'Strict geometry rules: do not redraw, simplify, expand, shrink, rotate, recenter, crop, or invent the map outline. Do not add new land shapes. Do not remove small islands. Keep the same 800x600-style canvas framing and the same empty outside area.',
-    'Composition/framing: artwork must fill the entire contour interior, including narrow coastal areas and islands. Place large representative dishes in the broad interior and smaller regional details near edges, but never let the generated composition change the silhouette.',
-    'Style/medium: high-quality polished guofeng realistic food illustration, dimensional collage, crisp edible details, premium competition demo asset, warm appetizing light.',
-    'Background/outside contour: keep everything outside the contour flat, clean, and visually removable. No shadows, textures, scenery, or objects outside the contour.',
-    'Constraints: no UI, no buttons, no watermark, no logos, no people, no large readable text.',
+    'Use case: infographic-diagram',
+    `Asset type: clipped SVG map-block fill for ${asset.themeName}`,
+    `Primary request: Create a polished AI-generated visual texture for the map block "${asset.title}".`,
+    `Zoom behavior: ${zoomText}.`,
+    `Cultural theme: ${asset.areaDescription || asset.themeDescription}`,
+    'Composition: fill the entire 16:10 frame edge to edge; avoid empty corners; no map outline, no labels, no UI frame.',
+    'Visual language: refined Chinese cultural infographic illustration, crisp symbolic objects, layered motifs, subtle depth, bright enough for map inspection.',
+    'Constraints: no readable text, no captions, no logos, no watermark, no people portraits, no national flags, no dark blur.',
+    'The browser will clip this rectangular image into the exact geographic contour, so keep important motifs near the center and distribute secondary texture across the full frame.',
   ].join('\n');
 }
 
 function buildDefaultAssets() {
-  const theme = DEFAULT_FOOD_THEME;
-  const assets = [
-    {
-      id: 'country:china',
-      inputImage: '/assets/food/china_contour.png',
-      kind: 'country',
-      name: theme.name,
+  const assets = [];
+
+  Object.entries(CULTURE_THEMES).forEach(([themeId, theme]) => {
+    assets.push({
+      id: `map:${themeId}:country-overview`,
+      kind: 'map',
+      level: 'country',
       outputImage: stripQuery(theme.chinaAsset.src),
       sourceImage: sourcePathFor(theme.chinaAsset.src),
-      title: '全国美食大盘',
-    },
-  ];
-
-  theme.areas.forEach((area) => {
-    assets.push({
-      areaId: area.id,
-      id: `area:${area.id}`,
-      inputImage: `/assets/food/${area.id}_contour.png`,
-      kind: 'area',
-      name: area.name,
-      outputImage: stripQuery(area.summaryAsset.src),
-      sourceImage: sourcePathFor(area.summaryAsset.src),
-      title: area.summaryAsset.title,
+      themeDescription: theme.description,
+      themeId,
+      themeName: theme.name,
+      title: `${theme.name}全国总览`,
     });
 
-    area.assets.forEach((asset) => {
-      assets.push({
-        areaId: area.id,
-        id: `province:${asset.provinceAdcode}`,
-        inputImage: `/assets/food/${asset.provinceAdcode}_contour.png`,
-        kind: 'province',
-        name: area.name,
-        outputImage: stripQuery(asset.src),
-        provinceAdcode: String(asset.provinceAdcode),
-        sourceImage: sourcePathFor(asset.src),
-        title: asset.title,
+    theme.areas.forEach((area) => {
+      ['country', 'area', 'province'].forEach((level) => {
+        const outputImage = stripQuery(area.mapFills?.[level]);
+        if (!outputImage) return;
+        assets.push({
+          areaDescription: area.description,
+          areaId: area.id,
+          areaName: area.name,
+          id: `map:${themeId}:${area.id}:${level}`,
+          kind: 'map',
+          level,
+          outputImage,
+          sourceImage: sourcePathFor(outputImage),
+          themeDescription: theme.description,
+          themeId,
+          themeName: theme.name,
+          title: `${area.name}${level === 'country' ? '全国视图' : level === 'area' ? '大区视图' : '省级视图'}`,
+        });
+      });
+
+      (area.foodItems || []).forEach((item) => {
+        const outputImage = stripQuery(item.detailImage || item.image);
+        if (!outputImage) return;
+        assets.push({
+          areaDescription: area.description,
+          areaId: area.id,
+          areaName: area.name,
+          id: `item:${themeId}:${item.id}`,
+          kind: 'item',
+          level: 'item',
+          outputImage,
+          process: item.process || [],
+          provinceAdcode: item.provinceAdcode ? String(item.provinceAdcode) : undefined,
+          sourceImage: sourcePathFor(outputImage),
+          themeDescription: theme.description,
+          themeId,
+          themeName: theme.name,
+          title: item.name || item.title || item.id,
+        });
       });
     });
   });
@@ -247,6 +303,55 @@ async function callImageEditApi(asset) {
   return Buffer.from(imageBase64, 'base64');
 }
 
+async function callImageGenerationApi(asset) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY 未设置，无法调用图片生成 API');
+  }
+
+  const imageGenerationUrl = `${getOpenAiApiBaseUrl()}/images/generations`;
+  const response = await fetch(imageGenerationUrl, {
+    body: JSON.stringify({
+      model: asset.model || process.env.IMAGE_GEN_MODEL || 'gpt-image-2',
+      n: 1,
+      output_format: 'png',
+      prompt: asset.prompt,
+      quality: asset.quality || process.env.IMAGE_GEN_QUALITY || 'medium',
+      size: asset.size || process.env.IMAGE_GEN_SIZE || '2048x1280',
+    }),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error?.message || payload.error || `图片生成 API 调用失败：${response.status} ${response.statusText} (${imageGenerationUrl})`);
+  }
+
+  const imageBase64 = payload.data?.[0]?.b64_json;
+  if (!imageBase64) {
+    throw new Error('图片生成 API 未返回 b64_json 图片数据');
+  }
+  return Buffer.from(imageBase64, 'base64');
+}
+
+async function optimizeDirectOutput(imageBytes, outputImage) {
+  const outputPath = publicToFilePath(outputImage);
+  if (extname(outputPath).toLowerCase() !== '.webp') return imageBytes;
+
+  const { default: sharp } = await import('sharp');
+  return sharp(imageBytes)
+    .webp({
+      effort: 5,
+      quality: 82,
+      smartSubsample: true,
+    })
+    .toBuffer();
+}
+
 async function clipAssetOutput(asset) {
   const sourcePath = publicToFilePath(asset.sourceImage);
   const outputPath = publicToFilePath(asset.outputImage);
@@ -266,15 +371,22 @@ async function clipAssetOutput(asset) {
 
 async function generateAndClipAsset(asset) {
   const sourcePath = publicToFilePath(asset.sourceImage);
-  const generatedBytes = await callImageEditApi(asset);
+  const canUseEdit = asset.inputImage && await pathExists(publicToFilePath(asset.inputImage));
+  const generatedBytes = canUseEdit ? await callImageEditApi(asset) : await callImageGenerationApi(asset);
   await mkdir(dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, generatedBytes);
 
-  await clipAssetOutput(asset);
+  if (canUseEdit) {
+    await clipAssetOutput(asset);
+  } else {
+    const outputPath = publicToFilePath(asset.outputImage);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, await optimizeDirectOutput(generatedBytes, asset.outputImage));
+  }
 
   return {
     ...asset,
-    clippedAt: new Date().toISOString(),
+    clippedAt: canUseEdit ? new Date().toISOString() : undefined,
     generatedAt: new Date().toISOString(),
     lastSourceBytes: generatedBytes.length,
   };
