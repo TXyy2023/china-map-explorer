@@ -4,11 +4,15 @@ import sharp from 'sharp';
 
 const SOURCE_DIR = 'public/assets/generated-culture';
 const DEFAULT_WEBP_QUALITY = 82;
+const DEFAULT_WIDTH = 2048;
+const DEFAULT_HEIGHT = 1280;
 
 function parseArgs(argv) {
   return {
     deleteSource: argv.includes('--delete-source'),
+    height: Number.parseInt(argv.find((arg) => arg.startsWith('--height='))?.split('=')[1], 10) || DEFAULT_HEIGHT,
     quality: Number.parseInt(argv.find((arg) => arg.startsWith('--quality='))?.split('=')[1], 10) || DEFAULT_WEBP_QUALITY,
+    width: Number.parseInt(argv.find((arg) => arg.startsWith('--width='))?.split('=')[1], 10) || DEFAULT_WIDTH,
   };
 }
 
@@ -32,7 +36,7 @@ async function optimizeOne(path, options) {
   const outputPath = path.replace(/\.png$/i, '.webp');
   await mkdir(dirname(outputPath), { recursive: true });
   await sharp(path)
-    .resize(1024, 640, {
+    .resize(options.width, options.height, {
       fit: 'cover',
       position: 'attention',
       withoutEnlargement: true,

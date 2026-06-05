@@ -598,6 +598,34 @@ function FoodMap({
     return found ? { h: y1 - y0, w: x1 - x0, x: x0, y: y0 } : null;
   }, [chinaGeoJson, currentArea, validFeatures, visibleAdcodes, pathGenerator]);
 
+  const areaBoundsMap = useMemo(() => {
+    const boundsByArea = new Map();
+    if (!chinaGeoJson || !validFeatures.length) return boundsByArea;
+
+    theme.areas.forEach((area) => {
+      const areaAdcodes = new Set((area.provinceAdcodes || []).map(String));
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      let found = false;
+
+      validFeatures.forEach((geo) => {
+        if (!areaAdcodes.has(String(geo.properties.adcode))) return;
+        const bounds = pathGenerator.bounds(geo);
+        if (!bounds) return;
+        x0 = Math.min(x0, bounds[0][0]);
+        y0 = Math.min(y0, bounds[0][1]);
+        x1 = Math.max(x1, bounds[1][0]);
+        y1 = Math.max(y1, bounds[1][1]);
+        found = true;
+      });
+
+      if (found) {
+        boundsByArea.set(area.id, { h: y1 - y0, w: x1 - x0, x: x0, y: y0 });
+      }
+    });
+
+    return boundsByArea;
+  }, [chinaGeoJson, pathGenerator, theme.areas, validFeatures]);
+
   // 3. 各省份的 bounds Map
   const provinceBoundsMap = useMemo(() => {
     const m = new Map();
@@ -832,21 +860,25 @@ function FoodMap({
             </Geographies>
 
             {/* 2. AI 生成图填充层：使用 SVG clipPath 保持地图轮廓精确 */}
-            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && theme.areas.map((area) => (
-              <image
-                className="map-fill-image map-fill-country"
-                data-anime-opacity="0.84"
-                href={getVersionedAsset(getAreaFillAsset(area, 'country'))}
-                key={`country-map-fill-${area.id}`}
-                x={chinaBounds.x}
-                y={chinaBounds.y}
-                width={chinaBounds.w}
-                height={chinaBounds.h}
-                clipPath={`url(#clip-area-${area.id})`}
-                preserveAspectRatio="xMidYMid slice"
-                style={{ '--map-fill-opacity': 0.84, pointerEvents: 'none' }}
-              />
-            ))}
+            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && theme.areas.map((area) => {
+              const bounds = areaBoundsMap.get(area.id);
+              if (!bounds) return null;
+              return (
+                <image
+                  className="map-fill-image map-fill-country"
+                  data-anime-opacity="0.84"
+                  href={getVersionedAsset(getAreaFillAsset(area, 'country'))}
+                  key={`country-map-fill-${area.id}`}
+                  x={bounds.x}
+                  y={bounds.y}
+                  width={bounds.w}
+                  height={bounds.h}
+                  clipPath={`url(#clip-area-${area.id})`}
+                  preserveAspectRatio="xMidYMid slice"
+                  style={{ '--map-fill-opacity': 0.84, pointerEvents: 'none' }}
+                />
+              );
+            })}
 
             {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
               <image

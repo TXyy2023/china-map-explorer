@@ -7,8 +7,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
 const DEFAULT_API_BASE = 'http://160.202.231.11:8700/v1';
 const DEFAULT_MODEL = 'gpt-image-2';
-const DEFAULT_SIZE = '1024x640';
-const DEFAULT_QUALITY = 'low';
+const DEFAULT_SIZE = '2048x1280';
+const DEFAULT_QUALITY = 'medium';
 const DEFAULT_CONCURRENCY = 2;
 const DEFAULT_MAX_ATTEMPTS = 4;
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000;
@@ -80,6 +80,15 @@ function publicAssetToFilePath(src) {
     throw new Error(`Only /assets public paths are supported: ${src}`);
   }
   return resolve(projectRoot, 'public', src.slice(1));
+}
+
+function dimensionsFromSize(size) {
+  const match = /^(\d+)x(\d+)$/i.exec(String(size || ''));
+  if (!match) return { height: 1280, width: 2048 };
+  return {
+    height: Number.parseInt(match[2], 10),
+    width: Number.parseInt(match[1], 10),
+  };
 }
 
 async function fileExists(path) {
@@ -255,8 +264,9 @@ async function optimizeForOutput(imageBytes, outputPath, options) {
   }
 
   const { default: sharp } = await import('sharp');
+  const dimensions = dimensionsFromSize(options.size);
   return sharp(imageBytes)
-    .resize(1024, 640, {
+    .resize(dimensions.width, dimensions.height, {
       fit: 'cover',
       position: 'attention',
       withoutEnlargement: true,
