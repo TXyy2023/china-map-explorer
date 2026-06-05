@@ -233,6 +233,7 @@ export function useAnimeMapStage(stageRef, motionKey, isLoading) {
     const fillImages = [...stage.querySelectorAll('.map-fill-image')];
     fillImages.forEach((image, index) => {
       const finalOpacity = Number.parseFloat(image.dataset.animeOpacity || '1');
+      const isHighlighted = image.dataset.animeHighlight === 'true';
       const seen = image.dataset.animeSeen === 'true';
       const currentOpacity = seen ? Number.parseFloat(getComputedStyle(image).opacity || '0') : 0;
       const startOpacity = Number.isFinite(currentOpacity) ? currentOpacity : 0;
@@ -244,7 +245,7 @@ export function useAnimeMapStage(stageRef, motionKey, isLoading) {
         duration: prefersReducedMotion() ? 1 : (seen ? 220 : image.classList.contains('is-soft') ? 460 : 620),
         ease: 'out(3)',
         opacity: [startOpacity, targetOpacity],
-        scale: seen ? [1, 1] : [0.965, 1],
+        scale: seen ? (isHighlighted ? 1.018 : 1) : [0.965, isHighlighted ? 1.018 : 1],
       }));
     });
 

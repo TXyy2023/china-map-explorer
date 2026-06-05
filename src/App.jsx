@@ -863,17 +863,18 @@ function FoodMap({
         const isActiveProvince = viewLevel === 'province' && selectedAdcode === adcode;
         const isPreviewArea = viewLevel === 'country' && hoveredAreaId && area.id === hoveredAreaId;
         const isPreviewProvince = previewAdcode === adcode;
+        const isHighlighted = isActiveProvince || isPreviewProvince || isPreviewArea || selectedAdcode === adcode;
         let opacity = 0.84;
         let shouldShow = viewLevel === 'country';
 
         if (viewLevel === 'area') {
           shouldShow = Boolean(isInFocusedArea);
-          opacity = isPreviewProvince || selectedAdcode === adcode ? 0.96 : 0.72;
+          opacity = isHighlighted ? 1 : 0.66;
         } else if (viewLevel === 'province') {
           shouldShow = Boolean(isInFocusedArea || isActiveProvince);
-          opacity = isActiveProvince ? 0.95 : 0.22;
+          opacity = isActiveProvince ? 1 : isPreviewProvince ? 0.86 : 0.22;
         } else if (hoveredAreaId) {
-          opacity = isPreviewArea ? 0.96 : 0.5;
+          opacity = isHighlighted ? 1 : 0.48;
         }
 
         if (!shouldShow) return null;
@@ -882,6 +883,7 @@ function FoodMap({
           adcode,
           bounds,
           isActiveProvince,
+          isHighlighted,
           isPreviewArea,
           isPreviewProvince,
           opacity,
@@ -930,7 +932,7 @@ function FoodMap({
     selectedProvinceAdcode || 'none',
     Math.round(mapSize.width),
     Math.round(mapSize.height),
-    mapFillItems.map((item) => `${item.adcode}:${item.opacity}`).join('|'),
+    mapFillItems.map((item) => `${item.adcode}:${item.opacity}:${item.isHighlighted ? 'hot' : 'idle'}`).join('|'),
   ].join('-');
   const foodSelectionKey = `${foodLayerKey}-${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}`;
 
@@ -1095,7 +1097,8 @@ function FoodMap({
             {/* 2. AI 生成图填充层：使用 SVG clipPath 保持地图轮廓精确 */}
             {mapFillItems.map((item) => (
               <image
-                className={`map-fill-image map-fill-province ${item.isActiveProvince ? 'is-active-fill' : ''}`}
+                className={`map-fill-image map-fill-province ${item.isHighlighted ? 'is-highlight-fill' : ''} ${item.isActiveProvince ? 'is-active-fill' : ''}`}
+                data-anime-highlight={item.isHighlighted ? 'true' : 'false'}
                 data-anime-opacity={String(item.opacity)}
                 href={getVersionedAsset(item.src)}
                 key={`province-map-fill-${viewLevel}-${item.adcode}`}
