@@ -480,8 +480,9 @@ function FoodMap({
     return version ? `${cleanSrc}?v=${version}` : cleanSrc;
   }
 
-  function getAreaFillAsset(area, zoomLevel) {
-    return area?.mapFills?.[zoomLevel] || area?.summaryAsset?.src || theme.chinaAsset?.src;
+  function getProvinceFillAsset(area, adcode) {
+    const asset = area?.assets?.find((item) => String(item.provinceAdcode) === String(adcode));
+    return asset?.src || area?.mapFills?.province || area?.mapFills?.area || area?.mapFills?.country || theme.chinaAsset?.src;
   }
 
   function recordFoodOrigin(event) {
@@ -500,6 +501,29 @@ function FoodMap({
       recordFoodOrigin(event);
       onHoverArea(area.id);
     }
+  }
+
+  function activateProvince(event, { adcode, area, isHidden, isInFocusedArea }) {
+    if (isHidden) return;
+    recordFoodOrigin(event);
+    if (viewLevel === 'country') {
+      if (area) {
+        onSelectArea(area.id);
+        onViewLevelChange('area');
+      } else {
+        onSelectProvince(adcode);
+        onViewLevelChange('province');
+      }
+    } else if (viewLevel === 'area' && isInFocusedArea) {
+      onSelectProvince(adcode);
+      onViewLevelChange('province');
+    }
+  }
+
+  function handleProvinceKeyDown(event, provinceState) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    activateProvince(event, provinceState);
   }
 
   // 用 React Query 异步拉取并缓存 GeoJSON
@@ -598,34 +622,6 @@ function FoodMap({
     return found ? { h: y1 - y0, w: x1 - x0, x: x0, y: y0 } : null;
   }, [chinaGeoJson, currentArea, validFeatures, visibleAdcodes, pathGenerator]);
 
-  const areaBoundsMap = useMemo(() => {
-    const boundsByArea = new Map();
-    if (!chinaGeoJson || !validFeatures.length) return boundsByArea;
-
-    theme.areas.forEach((area) => {
-      const areaAdcodes = new Set((area.provinceAdcodes || []).map(String));
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      let found = false;
-
-      validFeatures.forEach((geo) => {
-        if (!areaAdcodes.has(String(geo.properties.adcode))) return;
-        const bounds = pathGenerator.bounds(geo);
-        if (!bounds) return;
-        x0 = Math.min(x0, bounds[0][0]);
-        y0 = Math.min(y0, bounds[0][1]);
-        x1 = Math.max(x1, bounds[1][0]);
-        y1 = Math.max(y1, bounds[1][1]);
-        found = true;
-      });
-
-      if (found) {
-        boundsByArea.set(area.id, { h: y1 - y0, w: x1 - x0, x: x0, y: y0 });
-      }
-    });
-
-    return boundsByArea;
-  }, [chinaGeoJson, pathGenerator, theme.areas, validFeatures]);
-
   // 3. 各省份的 bounds Map
   const provinceBoundsMap = useMemo(() => {
     const m = new Map();
@@ -644,6 +640,46 @@ function FoodMap({
     });
     return m;
   }, [chinaGeoJson, validFeatures, pathGenerator]);
+
+  const mapFillItems = useMemo(() => {
+    if (theme.useImageFills === false || !validFeatures.length) return [];
+    const selectedAdcode = String(selectedProvinceAdcode || '');
+
+    return validFeatures
+      .map((geo) => {
+        const adcode = String(geo.properties.adcode);
+        const area = provinceAreaMap.get(adcode);
+        if (!area) return null;
+
+        const bounds = provinceBoundsMap.get(adcode);
+        if (!bounds) return null;
+
+        const isInFocusedArea = currentArea && visibleAdcodes.has(adcode);
+        const isActiveProvince = viewLevel === 'province' && selectedAdcode === adcode;
+        let opacity = 0.84;
+        let shouldShow = viewLevel === 'country';
+
+        if (viewLevel === 'area') {
+          shouldShow = Boolean(isInFocusedArea);
+          opacity = 0.9;
+        } else if (viewLevel === 'province') {
+          shouldShow = Boolean(isInFocusedArea || isActiveProvince);
+          opacity = isActiveProvince ? 0.95 : 0.22;
+        }
+
+        if (!shouldShow) return null;
+
+        return {
+          adcode,
+          bounds,
+          isActiveProvince,
+          opacity,
+          src: getProvinceFillAsset(area, adcode),
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => Number(left.isActiveProvince) - Number(right.isActiveProvince));
+  }, [currentArea, provinceAreaMap, provinceBoundsMap, selectedProvinceAdcode, theme, validFeatures, viewLevel, visibleAdcodes]);
 
   const provinceLabelItems = useMemo(() => {
     if (!validFeatures.length) return [];
@@ -805,28 +841,13 @@ function FoodMap({
                         className={`province ${isHidden ? 'is-hidden' : ''} ${viewLevel !== 'country' && isInFocusedArea ? 'is-focused' : ''} ${isActiveProvince ? 'is-active-province' : ''}`}
                         geography={geo}
                         key={`geo-interact-${geo.rsmKey}`}
-                        onClick={(event) => {
-                          recordFoodOrigin(event);
-                          if (viewLevel === 'country') {
-                            if (area) {
-                              onSelectArea(area.id);
-                              onViewLevelChange('area');
-                            } else {
-                              onSelectProvince(adcode);
-                              onViewLevelChange('province');
-                            }
-                          } else if (viewLevel === 'area') {
-                            if (isInFocusedArea) {
-                              onSelectProvince(adcode);
-                              onViewLevelChange('province');
-                            }
-                          }
-                        }}
+                        onClick={(event) => activateProvince(event, { adcode, area, isHidden, isInFocusedArea })}
                         onFocus={() => {
                           if (viewLevel === 'country' && area) {
                             onHoverArea(area.id);
                           }
                         }}
+                        onKeyDown={(event) => handleProvinceKeyDown(event, { adcode, area, isHidden, isInFocusedArea })}
                         onMouseEnter={(event) => handleAreaPointer(event, area)}
                         onMouseMove={(event) => handleAreaPointer(event, area)}
                         role="button"
@@ -852,7 +873,7 @@ function FoodMap({
                             outline: 'none',
                           },
                         }}
-                        tabIndex={0}
+                        tabIndex={isHidden ? -1 : 0}
                       />
                     );
                   });
@@ -860,86 +881,21 @@ function FoodMap({
             </Geographies>
 
             {/* 2. AI 生成图填充层：使用 SVG clipPath 保持地图轮廓精确 */}
-            {theme.useImageFills !== false && viewLevel === 'country' && chinaBounds && theme.areas.map((area) => {
-              const bounds = areaBoundsMap.get(area.id);
-              if (!bounds) return null;
-              return (
-                <image
-                  className="map-fill-image map-fill-country"
-                  data-anime-opacity="0.84"
-                  href={getVersionedAsset(getAreaFillAsset(area, 'country'))}
-                  key={`country-map-fill-${area.id}`}
-                  x={bounds.x}
-                  y={bounds.y}
-                  width={bounds.w}
-                  height={bounds.h}
-                  clipPath={`url(#clip-area-${area.id})`}
-                  preserveAspectRatio="xMidYMid slice"
-                  style={{ '--map-fill-opacity': 0.84, pointerEvents: 'none' }}
-                />
-              );
-            })}
-
-            {theme.useImageFills !== false && viewLevel === 'area' && areaBounds && currentArea && (
+            {mapFillItems.map((item) => (
               <image
-                className="map-fill-image map-fill-area"
-                data-anime-opacity="0.9"
-                href={getVersionedAsset(getAreaFillAsset(currentArea, 'area'))}
-                key={`area-food-map-${currentArea.id}`}
-                x={areaBounds.x}
-                y={areaBounds.y}
-                width={areaBounds.w}
-                height={areaBounds.h}
-                clipPath={`url(#clip-area-${currentArea.id})`}
+                className={`map-fill-image map-fill-province ${item.isActiveProvince ? 'is-active-fill' : ''}`}
+                data-anime-opacity={String(item.opacity)}
+                href={getVersionedAsset(item.src)}
+                key={`province-map-fill-${viewLevel}-${item.adcode}`}
+                x={item.bounds.x}
+                y={item.bounds.y}
+                width={item.bounds.w}
+                height={item.bounds.h}
+                clipPath={`url(#clip-province-${item.adcode})`}
                 preserveAspectRatio="xMidYMid slice"
-                style={{ '--map-fill-opacity': 0.9, pointerEvents: 'none' }}
+                style={{ '--map-fill-opacity': item.opacity, pointerEvents: 'none' }}
               />
-            )}
-
-            {viewLevel === 'province' && currentArea && (
-              <>
-                {/* 2.1 大区同区其他省份半透明显示总结图背景 */}
-                {theme.useImageFills !== false && areaBounds && (
-                  <image
-                    className="map-fill-image map-fill-area is-soft"
-                    data-anime-opacity="0.22"
-                    href={getVersionedAsset(getAreaFillAsset(currentArea, 'area'))}
-                    key={`area-food-map-soft-${currentArea.id}`}
-                    x={areaBounds.x}
-                    y={areaBounds.y}
-                    width={areaBounds.w}
-                    height={areaBounds.h}
-                    clipPath={`url(#clip-area-${currentArea.id})`}
-                    preserveAspectRatio="xMidYMid slice"
-                    style={{ '--map-fill-opacity': 0.22, pointerEvents: 'none' }}
-                  />
-                )}
-                {/* 2.2 聚焦激活的省份以 100% 不透明度呈现省级图板 */}
-                {theme.useImageFills !== false && (() => {
-                  const adcode = String(selectedProvinceAdcode);
-                  const bounds = provinceBoundsMap.get(adcode);
-                  const asset = currentArea?.assets?.find(a => String(a.provinceAdcode) === adcode);
-                  if (bounds) {
-                    return (
-                      <image
-                        className="map-fill-image map-fill-province"
-                        data-anime-opacity="0.95"
-                        href={getVersionedAsset(asset?.src || getAreaFillAsset(currentArea, 'province') || `/assets/food/${adcode}_contour.png`)}
-                        key={`province-food-map-${adcode}`}
-                        x={bounds.x}
-                        y={bounds.y}
-                        width={bounds.w}
-                        height={bounds.h}
-                        clipPath={`url(#clip-province-${adcode})`}
-                        preserveAspectRatio="xMidYMid slice"
-                        style={{ '--map-fill-opacity': 0.95, pointerEvents: 'none' }}
-                      />
-                    );
-                  }
-                  return null;
-                })()}
-              </>
-            )}
+            ))}
 
             <g className={`map-boundary-layer boundaries-${viewLevel}`} pointerEvents="none">
               {validFeatures.map((geo) => {
