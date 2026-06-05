@@ -24,6 +24,7 @@ const getGeneratedThemeId = (areaId) => {
   const id = String(areaId);
   if (id.startsWith('architecture-')) return 'architecture';
   if (id.startsWith('clothing-')) return 'clothing';
+  if (id.includes('-food')) return 'food';
   return 'religion';
 };
 
@@ -879,15 +880,276 @@ const BASE_CLOTHING_CULTURE_THEME = {
   ],
 };
 
+const FOOD_PROVINCES = {
+  '110000': { coordinates: [116.4, 40.2], dish: '北京烤鸭', name: '北京', title: '帝都烤鸭涮羊肉图' },
+  '120000': { coordinates: [117.2, 39.12], dish: '煎饼馃子', name: '天津', title: '津门麻花煎饼馃图' },
+  '130000': { coordinates: [114.48, 38.03], dish: '驴肉火烧', name: '河北', title: '直隶驴肉火烧图' },
+  '140000': { coordinates: [112.55, 37.87], dish: '刀削面', name: '山西', title: '三晋老醋面点图' },
+  '150000': { coordinates: [111.67, 40.82], dish: '手把肉', name: '内蒙古', title: '草原手把肉奶茶图' },
+  '210000': { coordinates: [123.43, 41.8], dish: '锅包肉', name: '辽宁', title: '辽沈锅包肉鸡架图' },
+  '220000': { coordinates: [125.32, 43.9], dish: '延边冷面', name: '吉林', title: '吉林延边冷面打糕图' },
+  '230000': { coordinates: [126.64, 45.75], dish: '哈尔滨红肠', name: '黑龙江', title: '黑龙江红肠炖菜图' },
+  '310000': { coordinates: [121.47, 31.23], dish: '小笼汤包', name: '上海', title: '沪上小笼生煎图' },
+  '320000': { coordinates: [119.78, 33.04], dish: '金陵盐水鸭', name: '江苏', title: '金陵盐水板鸭图' },
+  '330000': { coordinates: [120.15, 29.18], dish: '西湖醋鱼', name: '浙江', title: '西湖醋鱼东坡肉图' },
+  '340000': { coordinates: [117.27, 31.86], dish: '徽州毛豆腐', name: '安徽', title: '徽州毛豆腐臭鳜鱼图' },
+  '350000': { coordinates: [119.3, 26.08], dish: '佛跳墙', name: '福建', title: '福建佛跳墙沙茶面图' },
+  '360000': { coordinates: [115.85, 28.68], dish: '南昌拌粉', name: '江西', title: '江西拌粉瓦罐汤图' },
+  '370000': { coordinates: [117, 36.65], dish: '九转大肠', name: '山东', title: '齐鲁九转大肠葱海参图' },
+  '410000': { coordinates: [113.65, 34.76], dish: '胡辣汤', name: '河南', title: '中原烩面胡辣汤图' },
+  '420000': { coordinates: [114.3, 30.6], dish: '热干面', name: '湖北', title: '荆楚热干面藕汤图' },
+  '430000': { coordinates: [112.98, 28.2], dish: '剁椒鱼头', name: '湖南', title: '湖湘剁椒鱼头臭豆腐图' },
+  '440000': { coordinates: [113.25, 23.1], dish: '水晶虾饺', name: '广东', title: '广式烧腊水晶虾饺图' },
+  '450000': { coordinates: [108.32, 22.81], dish: '柳州螺蛳粉', name: '广西', title: '柳州螺蛳粉桂林米粉图' },
+  '460000': { coordinates: [110.35, 19], dish: '文昌鸡', name: '海南', title: '椰风文昌鸡清补凉图' },
+  '500000': { coordinates: [108.3, 29.5], dish: '九宫火锅', name: '重庆', title: '山城九宫火锅图' },
+  '510000': { coordinates: [103, 30.5], dish: '麻婆豆腐', name: '四川', title: '巴蜀天府麻辣图' },
+  '520000': { coordinates: [106.71, 26.57], dish: '酸汤鱼', name: '贵州', title: '黔味酸汤辣子鸡图' },
+  '530000': { coordinates: [102.72, 25.04], dish: '过桥米线', name: '云南', title: '云南米线菌菇图' },
+  '540000': { coordinates: [91.13, 29.65], dish: '酥油茶', name: '西藏', title: '西藏酥油茶牦牛肉图' },
+  '610000': { coordinates: [108.95, 34.27], dish: '腊汁肉夹馍', name: '陕西', title: '三秦凉皮肉夹馍图' },
+  '620000': { coordinates: [103.82, 36.06], dish: '牛肉拉面', name: '甘肃', title: '陇上牛肉拉面图' },
+  '630000': { coordinates: [101.78, 36.62], dish: '青海尕面片', name: '青海', title: '高原尕面片羊肉图' },
+  '640000': { coordinates: [106.27, 38.47], dish: '滩羊手抓', name: '宁夏', title: '塞上滩羊八宝茶图' },
+  '650000': { coordinates: [87.68, 43.77], dish: '新疆大盘鸡', name: '新疆', title: '西域大盘鸡烤串图' },
+  '710000': { coordinates: [121.56, 25.04], dish: '卤肉饭', name: '台湾', title: '台湾卤肉饭夜市图' },
+  '810000': { coordinates: [114.17, 22.28], dish: '丝袜奶茶', name: '香港', title: '港式茶餐厅风情图' },
+  '820000': { coordinates: [113.54, 22.19], dish: '葡式蛋挞', name: '澳门', title: '澳门葡挞猪扒包图' },
+};
+
+const foodImage = (adcode) => `/assets/food/${adcode}-food-ai.png`;
+
+const foodProcess = (meta) => [
+  `精选${meta.name}代表食材`,
+  `围绕${meta.dish}处理主味`,
+  '用地方调味和火候形成标志口感',
+  '生成省级美食图鉴线索',
+];
+
+const foodQuiz = (name, dish) => ({
+  answerIndex: 1,
+  options: ['A. 只看餐具形制', `B. ${dish}与地方食材、火候和调味`, 'C. 完全脱离地域物产', 'D. 只按现代快餐分类'],
+  question: `${name}美食线索最应该从哪一组信息理解？`,
+  successReward: `已点亮“${name}${dish}”美食线索。`,
+});
+
+const makeFoodArea = ({
+  center,
+  color,
+  description,
+  id,
+  name,
+  provinceAdcodes,
+  summarySrc,
+  summaryTitle,
+  zoom,
+}) => {
+  const areaQuiz = foodQuiz(name, FOOD_PROVINCES[provinceAdcodes[0]]?.dish || '地方风味');
+  return {
+    center,
+    color,
+    description,
+    id,
+    name,
+    provinceAdcodes,
+    zoom,
+    summaryAsset: {
+      coordinates: center,
+      id: `summary-${id}`,
+      size: { height: 160, width: 220 },
+      src: summarySrc,
+      title: summaryTitle,
+      type: 'image',
+    },
+    foodItems: provinceAdcodes.map((adcode) => {
+      const meta = FOOD_PROVINCES[adcode];
+      return {
+        detailImage: foodImage(adcode),
+        id: `food-${adcode}`,
+        image: foodImage(adcode),
+        name: meta.dish,
+        objectPosition: '50% 50%',
+        process: foodProcess(meta),
+        provinceAdcode: adcode,
+      };
+    }),
+    assets: provinceAdcodes.map((adcode) => {
+      const meta = FOOD_PROVINCES[adcode];
+      return {
+        areaId: id,
+        coordinates: meta.coordinates,
+        id: `${id}-${adcode}`,
+        provinceAdcode: adcode,
+        quiz: foodQuiz(meta.name, meta.dish),
+        size: { height: 130, width: 180 },
+        src: foodImage(adcode),
+        title: meta.title,
+        type: 'image',
+      };
+    }),
+    quiz: areaQuiz,
+  };
+};
+
+const BASE_CULINARY_CULTURE_THEME = {
+  chinaAsset: {
+    id: 'china-food-summary',
+    src: '/assets/food/china-food-ai.png',
+  },
+  cultureType: 'food',
+  moduleId: 'food',
+  copy: {
+    areaCountLabel: '美食文化区',
+    areaDetailLabel: '美食文化区详情',
+    countryKicker: '中国美食文化版图',
+    countryStatus: '中国美食文化版图视图',
+    exploreLabel: '中国美食文化区探索 ✦ React 自适应投影',
+    loadingLabel: '美食地图加载中...',
+    overviewTitle: '十大美食文化区总览',
+    provinceDescription: '探索省级美食文化线索。',
+    provinceLabel: '省级美食线索',
+    quizLabel: '美食区知识问答',
+    readyNotice: '美食文化地图已就绪，等待探索',
+    resetNotice: '系统成功复位：地图已恢复至默认美食文化配置',
+    returnCountryNotice: '已返回全国美食文化大盘',
+    targetAreaLabel: '目标美食文化区',
+  },
+  description: '以中国省级地图为底盘，展示十大地域美食文化区，串联川渝麻辣、江南鲜食、岭南早茶、西北面食、北方宴席、黔味酸辣、东北炖菜、闽台山海、荆楚湖湘与云藏高原风物。',
+  id: 'chinese-food-culture-map',
+  name: '中国美食文化地图',
+  useImageFills: true,
+  areas: [
+    makeFoodArea({
+      center: [104.7, 30.4],
+      color: '#e65d4f',
+      description: '麻辣火锅、豆花、串串与江湖菜共同构成热烈的川渝味觉，麻辣鲜香间显现巴蜀人爽朗炙热的性格。',
+      id: 'sichuan-chongqing-food',
+      name: '川渝麻辣美食区',
+      provinceAdcodes: ['500000', '510000'],
+      summarySrc: '/assets/food/sichuan-chongqing-food-summary.png',
+      summaryTitle: '巴蜀川渝美食汇',
+      zoom: 4.8,
+    }),
+    makeFoodArea({
+      center: [119.6, 31.2],
+      color: '#2a9d8f',
+      description: '小笼、汤包、糕团、鲜食与水乡风物形成细腻温润的江南食谱。',
+      id: 'jiangnan-snack-food',
+      name: '江南点心鲜食区',
+      provinceAdcodes: ['310000', '320000', '330000', '340000'],
+      summarySrc: '/assets/food/jiangnan-snack-food-summary.png',
+      summaryTitle: '江南水乡鲜食汇',
+      zoom: 4.2,
+    }),
+    makeFoodArea({
+      center: [113.9, 22.8],
+      color: '#f4a261',
+      description: '早茶、烧腊、海味与骑楼市井串联出烟火气十足的岭南餐桌。',
+      id: 'lingnan-dim-sum-food',
+      name: '岭南早茶海味区',
+      provinceAdcodes: ['440000', '450000', '460000', '810000', '820000'],
+      summarySrc: '/assets/food/lingnan-dim-sum-food-summary.png',
+      summaryTitle: '岭南早茶海味汇',
+      zoom: 4.0,
+    }),
+    makeFoodArea({
+      center: [95.6, 38.9],
+      color: '#d6a84f',
+      description: '面食、羊肉、香料与绿洲集市让西北味道有清晰的地理线索。',
+      id: 'northwest-noodle-food',
+      name: '西北面食香料区',
+      provinceAdcodes: ['610000', '620000', '630000', '640000', '650000'],
+      summarySrc: '/assets/food/northwest-noodle-food-summary.png',
+      summaryTitle: '丝路塞外香料汇',
+      zoom: 3.0,
+    }),
+    makeFoodArea({
+      center: [114.2, 37.1],
+      color: '#457b9d',
+      description: '面点、鲁菜、豫菜与宴席传统共同组成北方餐桌骨架。',
+      id: 'northern-banquet-food',
+      name: '北方宴席面点区',
+      provinceAdcodes: ['110000', '120000', '130000', '140000', '370000', '410000'],
+      summarySrc: '/assets/food/northern-banquet-food-summary.png',
+      summaryTitle: '燕赵齐鲁宴席汇',
+      zoom: 3.8,
+    }),
+    makeFoodArea({
+      center: [106.7, 26.6],
+      color: '#ad2831',
+      description: '酸汤鱼、辣子鸡、折耳根与肠旺面共同串起贵州山水间的酸辣滋味。',
+      id: 'guizhou-sour-spicy-food',
+      name: '黔味酸辣美食区',
+      provinceAdcodes: ['520000'],
+      summarySrc: '/assets/food/guizhou-food-ai.png',
+      summaryTitle: '黔味山水酸辣汇',
+      zoom: 5.2,
+    }),
+    makeFoodArea({
+      center: [123.5, 44.6],
+      color: '#8ab17d',
+      description: '炖菜、杂粮、乳肉与冰雪市集构成北疆与东北的厚实风味。',
+      id: 'northeast-grain-stew-food',
+      name: '东北草原炖菜区',
+      provinceAdcodes: ['150000', '210000', '220000', '230000'],
+      summarySrc: '/assets/food/northeast-grain-stew-food-summary.png',
+      summaryTitle: '东北草原炖菜汇',
+      zoom: 3.2,
+    }),
+    makeFoodArea({
+      center: [117.8, 25.8],
+      color: '#6d597a',
+      description: '山海物产、米粉汤头、红糟沙茶与宝岛夜市相连，形成东南沿海轻巧鲜香的饮食脉络。',
+      id: 'southeast-mintai-gan-food',
+      name: '闽台赣山海米粉区',
+      provinceAdcodes: ['350000', '360000', '710000'],
+      summarySrc: '/assets/food/southeast-mintai-gan-food-summary.png',
+      summaryTitle: '闽台赣山海米粉汇',
+      zoom: 4.0,
+    }),
+    makeFoodArea({
+      center: [112.4, 29.5],
+      color: '#d62828',
+      description: '江湖湖鲜、莲藕汤、剁椒腊味与夜市烟火交织出荆楚湖湘的热辣鲜香。',
+      id: 'jingchu-huxiang-food',
+      name: '荆楚湖湘热辣区',
+      provinceAdcodes: ['420000', '430000'],
+      summarySrc: '/assets/food/jingchu-huxiang-food-summary.png',
+      summaryTitle: '荆楚湖湘热辣汇',
+      zoom: 4.6,
+    }),
+    makeFoodArea({
+      center: [95.6, 28.6],
+      color: '#9d4edd',
+      description: '菌菇、米线、牦牛肉、酥油茶与高原物产共同组成云藏风物。',
+      id: 'yunnan-tibet-highland-food',
+      name: '云藏高原风物区',
+      provinceAdcodes: ['530000', '540000'],
+      summarySrc: '/assets/food/yunnan-tibet-highland-food-summary.png',
+      summaryTitle: '云藏高原风物汇',
+      zoom: 3.4,
+    }),
+  ],
+};
+
 export const DEFAULT_FOOD_THEME = applyGeneratedCultureImages(BASE_FOOD_THEME, 'religion');
 
 export const ARCHITECTURE_CULTURE_THEME = applyGeneratedCultureImages(BASE_ARCHITECTURE_CULTURE_THEME, 'architecture');
 
 export const CLOTHING_CULTURE_THEME = applyGeneratedCultureImages(BASE_CLOTHING_CULTURE_THEME, 'clothing');
 
+export const CULINARY_CULTURE_THEME = BASE_CULINARY_CULTURE_THEME;
+
 export const DEFAULT_CULTURE_THEME_ID = 'religion';
 
 export const CULTURE_THEME_OPTIONS = [
+  {
+    accent: '#e65d4f',
+    description: '十大美食文化区',
+    id: 'food',
+    label: '美食',
+    notice: '已切换至美食文化地图',
+  },
   {
     accent: '#d4af37',
     description: '六大信仰文化区',
@@ -914,6 +1176,7 @@ export const CULTURE_THEME_OPTIONS = [
 export const CULTURE_THEMES = {
   architecture: ARCHITECTURE_CULTURE_THEME,
   clothing: CLOTHING_CULTURE_THEME,
+  food: CULINARY_CULTURE_THEME,
   religion: DEFAULT_FOOD_THEME,
 };
 

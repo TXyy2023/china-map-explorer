@@ -1663,16 +1663,17 @@ html.theme-market-night, body.theme-market-night {
    顶栏文化类型切换组件
    ========================================== */
 .culture-theme-switch {
-  display: flex;
-  gap: 6px;
-  width: min(32vw, 360px);
-  max-width: min(32vw, 360px);
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(74px, 1fr));
+  gap: 4px;
+  width: min(42vw, 520px);
+  max-width: min(42vw, 520px);
+  min-width: 360px;
+  overflow: hidden;
   padding: 3px;
   border: 1px solid var(--stroke);
-  border-radius: 999px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.02);
-  transition: all 0.3s ease;
   scrollbar-width: none;
 }
 
@@ -1683,19 +1684,18 @@ html.theme-market-night, body.theme-market-night {
 .culture-theme-switch button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 0 14px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 12px;
   background: transparent;
   color: var(--muted);
   font-size: 0.86rem;
   font-weight: 700;
-  white-space: nowrap;
   cursor: pointer;
-  transition: transform 0.22s ease, background 0.22s ease, color 0.22s ease, box-shadow 0.22s ease;
 }
 
 .culture-theme-switch button:hover {
@@ -1705,20 +1705,33 @@ html.theme-market-night, body.theme-market-night {
 
 .culture-theme-switch button.is-active {
   color: #071014;
-  background: linear-gradient(135deg, var(--culture-color), color-mix(in srgb, var(--culture-color) 34%, #fff 66%));
+  background: color-mix(in srgb, var(--culture-color) 72%, #fff 28%);
   box-shadow: 0 4px 14px color-mix(in srgb, var(--culture-color) 32%, transparent);
+}
+
+.culture-option-copy {
+  display: grid;
+  min-width: 0;
+  line-height: 1.05;
+}
+
+.culture-option-copy span,
+.culture-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .culture-theme-switch small {
   color: inherit;
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 600;
   opacity: 0.78;
 }
 
 @media (max-width: 1024px) {
   .topbar {
-    grid-template-columns: minmax(190px, 1fr) auto auto;
+    grid-template-columns: minmax(170px, 1fr) minmax(250px, 1.2fr) auto;
   }
 
   .topbar-status {
@@ -1726,8 +1739,13 @@ html.theme-market-night, body.theme-market-night {
   }
 
   .culture-theme-switch {
-    width: min(34vw, 260px);
-    max-width: min(34vw, 260px);
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .culture-theme-switch small {
+    display: none;
   }
 }
 
@@ -1745,10 +1763,16 @@ html.theme-market-night, body.theme-market-night {
   .culture-theme-switch {
     grid-column: 1 / -1;
     width: 100%;
+    min-width: 0;
     max-width: none;
   }
 
   .culture-theme-switch button {
-    flex: 1;
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .culture-theme-switch small {
+    display: none;
   }
 }

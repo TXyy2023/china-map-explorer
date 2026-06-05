@@ -34,6 +34,7 @@ import {
   Trophy,
   HelpCircle,
   Award,
+  Utensils,
 } from 'lucide-react';
 import {
   CULTURE_THEME_OPTIONS,
@@ -1801,18 +1802,27 @@ function App() {
 
         <div className="culture-theme-switch" aria-label="文化类型切换">
           {CULTURE_THEME_OPTIONS.map((option) => {
-            const CultureIcon = option.id === 'architecture' ? Building2 : option.id === 'clothing' ? Shirt : Landmark;
+            const CultureIcon = option.id === 'architecture'
+              ? Building2
+              : option.id === 'clothing'
+              ? Shirt
+              : option.id === 'food'
+              ? Utensils
+              : Landmark;
             return (
               <button
                 className={cultureThemeId === option.id ? 'is-active' : ''}
+                aria-pressed={cultureThemeId === option.id}
                 key={option.id}
                 onClick={() => handleCultureThemeSwitch(option.id)}
                 style={{ '--culture-color': option.accent }}
                 type="button"
               >
                 <CultureIcon size={15} aria-hidden="true" />
-                <span>{option.label}</span>
-                <small>{option.description}</small>
+                <span className="culture-option-copy">
+                  <span>{option.label}</span>
+                  <small>{option.description}</small>
+                </span>
               </button>
             );
           })}

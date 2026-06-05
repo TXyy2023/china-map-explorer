@@ -71,8 +71,9 @@ function sourcePathFor(publicPath) {
 
 function promptForAsset(asset) {
   if (asset.inputImage) {
+    const themeSubject = asset.themeId === 'food' ? '地方美食与风物' : '地方文化与地貌';
     const subject = asset.kind === 'province'
-      ? `${asset.title}，${provinceNames[asset.provinceAdcode] || asset.provinceAdcode}地方文化与地貌`
+      ? `${asset.title}，${provinceNames[asset.provinceAdcode] || asset.provinceAdcode}${themeSubject}`
       : `${asset.title}，${asset.name || asset.title}地域文化总览`;
 
     return [
@@ -127,6 +128,7 @@ function buildDefaultAssets() {
   Object.entries(CULTURE_THEMES).forEach(([themeId, theme]) => {
     assets.push({
       id: `map:${themeId}:country-overview`,
+      inputImage: themeId === 'food' ? '/assets/food/china_contour.png' : undefined,
       kind: 'map',
       level: 'country',
       outputImage: stripQuery(theme.chinaAsset.src),
@@ -156,6 +158,28 @@ function buildDefaultAssets() {
           title: `${area.name}${level === 'country' ? '全国视图' : level === 'area' ? '大区视图' : '省级视图'}`,
         });
       });
+
+      if (themeId === 'food') {
+        (area.assets || []).forEach((asset) => {
+          if (!asset.src || !asset.provinceAdcode) return;
+          assets.push({
+            areaDescription: area.description,
+            areaId: area.id,
+            areaName: area.name,
+            id: `province:${themeId}:${asset.provinceAdcode}`,
+            inputImage: `/assets/food/${asset.provinceAdcode}_contour.png`,
+            kind: 'province',
+            level: 'province',
+            outputImage: stripQuery(asset.src),
+            provinceAdcode: String(asset.provinceAdcode),
+            sourceImage: sourcePathFor(asset.src),
+            themeDescription: theme.description,
+            themeId,
+            themeName: theme.name,
+            title: asset.title,
+          });
+        });
+      }
 
       (area.foodItems || []).forEach((item) => {
         const outputImage = stripQuery(item.detailImage || item.image);
