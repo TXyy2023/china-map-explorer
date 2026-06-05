@@ -46,6 +46,15 @@ import {
   getAreaById,
   getCultureThemeById,
 } from './foodMapConfig.js';
+import {
+  useAnimeFoodLayer,
+  useAnimeFoodSelection,
+  useAnimeHoverInteractions,
+  useAnimeMapStage,
+  useAnimePanelMotion,
+  useAnimeSpinners,
+  useAnimeThemeSwap,
+} from './animeMotion.js';
 import { useFoodMapStore } from './useFoodMapStore.js';
 
 // 中国省级地图 GeoJSON 边界数据路径
@@ -55,6 +64,13 @@ const FALLBACK_MAP_SIZE = { height: 560, width: 960 };
 // 地图在画布容器中的边缘填充边距
 const MAP_PADDING = 20;
 const FOOD_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const IMAGE_CACHE_NAME = 'china-map-explorer-image-cache-v1';
+const IMAGE_ASSET_RE = /\.(png|jpe?g|webp|gif|svg)$/i;
+const IMAGE_DB_NAME = 'china-map-explorer-image-cache';
+const IMAGE_DB_STORE = 'images';
+const IMAGE_DB_VERSION = 1;
+
+let imageDbPromise = null;
 
 /**
  * 由 XState 严谨驱动的视图状态机
@@ -196,6 +212,199 @@ function buildFeatureCollection(features = []) {
     features,
     type: 'FeatureCollection',
   };
+}
+
+function addVersionedImageUrl(urls, src, assetVersions) {
+  if (!src) return;
+  const cleanSrc = String(src).split('?')[0];
+  if (!cleanSrc || !IMAGE_ASSET_RE.test(cleanSrc)) return;
+  const version = assetVersions[cleanSrc];
+  urls.add(version ? `${cleanSrc}?v=${version}` : cleanSrc);
+}
+
+function collectThemeImageUrls(theme, assetVersions) {
+  const urls = new Set();
+  addVersionedImageUrl(urls, theme?.chinaAsset?.src, assetVersions);
+
+  theme?.areas?.forEach((area) => {
+    addVersionedImageUrl(urls, area.summaryAsset?.src, assetVersions);
+    Object.values(area.mapFills || {}).forEach((src) => addVersionedImageUrl(urls, src, assetVersions));
+
+    area.assets?.forEach((asset) => {
+      addVersionedImageUrl(urls, asset.src, assetVersions);
+      addVersionedImageUrl(urls, asset.outputImage, assetVersions);
+      addVersionedImageUrl(urls, asset.sourceImage, assetVersions);
+    });
+
+    area.foodItems?.forEach((item) => {
+      addVersionedImageUrl(urls, item.image, assetVersions);
+      addVersionedImageUrl(urls, item.detailImage, assetVersions);
+      addVersionedImageUrl(urls, item.fallbackImage, assetVersions);
+    });
+  });
+
+  return Array.from(urls);
+}
+
+function openImageCacheDb() {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) {
+    return Promise.resolve(null);
+  }
+  if (imageDbPromise) return imageDbPromise;
+
+  imageDbPromise = new Promise((resolve) => {
+    const request = window.indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IMAGE_DB_STORE)) {
+        db.createObjectStore(IMAGE_DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+
+  return imageDbPromise;
+}
+
+function readCachedImageBlob(db, url) {
+  if (!db) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const transaction = db.transaction(IMAGE_DB_STORE, 'readonly');
+    const request = transaction.objectStore(IMAGE_DB_STORE).get(url);
+    request.onsuccess = () => resolve(request.result?.blob || null);
+    request.onerror = () => resolve(null);
+  });
+}
+
+function writeCachedImageBlob(db, url, blob) {
+  if (!db || !blob) return Promise.resolve();
+  return new Promise((resolve) => {
+    const transaction = db.transaction(IMAGE_DB_STORE, 'readwrite');
+    transaction.objectStore(IMAGE_DB_STORE).put({ blob, cachedAt: Date.now() }, url);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
+}
+
+function getCachedImageUrl(src, assetVersions, cachedImageUrls) {
+  const cleanSrc = String(src || '').split('?')[0];
+  if (!cleanSrc) return cleanSrc;
+  const version = assetVersions[cleanSrc];
+  const versionedSrc = version ? `${cleanSrc}?v=${version}` : cleanSrc;
+  return cachedImageUrls[versionedSrc] || cachedImageUrls[cleanSrc] || versionedSrc;
+}
+
+function useLocalImageCache(theme, assetVersions) {
+  const [cachedImageUrls, setCachedImageUrls] = useState({});
+  const objectUrlRef = useRef(new Map());
+  const imageUrls = useMemo(
+    () => collectThemeImageUrls(theme, assetVersions),
+    [theme, assetVersions],
+  );
+  const imageCacheKey = imageUrls.join('\n');
+
+  useEffect(() => () => {
+    objectUrlRef.current.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    objectUrlRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (!imageUrls.length || typeof window === 'undefined') return undefined;
+
+    let cancelled = false;
+    let idleId = null;
+    let fallbackTimer = null;
+    const preloadedImages = [];
+
+    function publishBlobUrl(url, blob) {
+      if (cancelled || !blob) return;
+      let objectUrl = objectUrlRef.current.get(url);
+      if (!objectUrl) {
+        objectUrl = URL.createObjectURL(blob);
+        objectUrlRef.current.set(url, objectUrl);
+      }
+      setCachedImageUrls((previous) => (
+        previous[url] === objectUrl ? previous : { ...previous, [url]: objectUrl }
+      ));
+    }
+
+    async function warmImageCache() {
+      const cache = 'caches' in window
+        ? await window.caches.open(IMAGE_CACHE_NAME).catch(() => null)
+        : null;
+      const db = await openImageCacheDb();
+      let nextIndex = 0;
+
+      async function worker() {
+        while (!cancelled && nextIndex < imageUrls.length) {
+          const url = imageUrls[nextIndex];
+          nextIndex += 1;
+
+          try {
+            const dbBlob = await readCachedImageBlob(db, url);
+            if (dbBlob) {
+              publishBlobUrl(url, dbBlob);
+              continue;
+            }
+
+            if (cache) {
+              const cached = await cache.match(url);
+              if (cached) {
+                const blob = await cached.blob();
+                publishBlobUrl(url, blob);
+                await writeCachedImageBlob(db, url, blob);
+                continue;
+              } else {
+                const response = await fetch(url, { cache: 'force-cache' });
+                if (response.ok) {
+                  await cache.put(url, response.clone());
+                  const blob = await response.blob();
+                  publishBlobUrl(url, blob);
+                  await writeCachedImageBlob(db, url, blob);
+                  continue;
+                }
+              }
+            } else {
+              const response = await fetch(url, { cache: 'force-cache' });
+              if (response.ok) {
+                const blob = await response.blob();
+                publishBlobUrl(url, blob);
+                await writeCachedImageBlob(db, url, blob);
+              }
+            }
+
+            const image = new Image();
+            image.decoding = 'async';
+            image.src = objectUrlRef.current.get(url) || url;
+            preloadedImages.push(image);
+            await image.decode?.().catch(() => undefined);
+          } catch {
+            // 缓存预热失败不影响正常图片加载。
+          }
+        }
+      }
+
+      await Promise.all(Array.from({ length: Math.min(4, imageUrls.length) }, worker));
+    }
+
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(warmImageCache, { timeout: 1800 });
+    } else {
+      fallbackTimer = window.setTimeout(warmImageCache, 0);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId !== null) window.cancelIdleCallback(idleId);
+      if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
+      preloadedImages.length = 0;
+    };
+  }, [imageCacheKey, imageUrls]);
+
+  return cachedImageUrls;
 }
 
 /**
@@ -432,6 +641,7 @@ function buildFoodItemLayout(items, mapSize, focusBounds, viewLevel, areaId) {
  */
 function FoodMap({
   assetVersions,
+  cachedImageUrls,
   currentArea,
   hoveredAreaId,
   hoveredProvinceAdcode,
@@ -456,9 +666,7 @@ function FoodMap({
   const themeCopy = getThemeCopy(theme);
 
   function getVersionedAsset(src) {
-    const cleanSrc = String(src || '').split('?')[0];
-    const version = assetVersions[cleanSrc];
-    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+    return getCachedImageUrl(src, assetVersions, cachedImageUrls);
   }
 
   function getProvinceFillAsset(area, adcode) {
@@ -493,6 +701,10 @@ function FoodMap({
     if (String(adcode) !== String(hoveredProvinceAdcode || '')) {
       onHoverProvince(adcode, area?.id);
     }
+  }
+
+  function handleStagePointerLeave() {
+    onHoverProvince(null);
   }
 
   function activateProvince(event, { adcode, area, isHidden, isInFocusedArea }) {
@@ -710,15 +922,24 @@ function FoodMap({
   );
 
   const foodLayerKey = `${activeFoodArea?.id || 'country'}-${viewLevel}-${Math.round(mapSize.width)}-${Math.round(mapSize.height)}`;
+  const mapStageMotionKey = [
+    theme.id,
+    viewLevel,
+    hoveredAreaId || 'none',
+    hoveredProvinceAdcode || 'none',
+    selectedProvinceAdcode || 'none',
+    Math.round(mapSize.width),
+    Math.round(mapSize.height),
+    mapFillItems.map((item) => `${item.adcode}:${item.opacity}`).join('|'),
+  ].join('-');
+  const foodSelectionKey = `${foodLayerKey}-${selectedFoodItem?.areaId || 'none'}-${selectedFoodItem?.id || 'none'}`;
 
-  useEffect(() => {
-    setIsFoodLayerReady(false);
-    const timer = window.setTimeout(() => setIsFoodLayerReady(true), 1160);
-    return () => window.clearTimeout(timer);
-  }, [foodLayerKey]);
+  useAnimeMapStage(mapStageRef, mapStageMotionKey, mapLoading);
+  useAnimeFoodLayer(mapStageRef, foodLayerKey, foodLayoutItems.length, setIsFoodLayerReady);
+  useAnimeFoodSelection(mapStageRef, foodSelectionKey, isFoodLayerReady);
 
   return (
-    <div className="map-stage" ref={mapStageRef}>
+    <div className="map-stage" onPointerLeave={handleStagePointerLeave} ref={mapStageRef}>
       <ComposableMap
         height={mapSize.height}
         projection={projection}
@@ -831,6 +1052,7 @@ function FoodMap({
                         className={`province ${isHidden ? 'is-hidden' : ''} ${viewLevel !== 'country' && isInFocusedArea ? 'is-focused' : ''} ${isPreviewArea || isPreviewProvince ? 'is-hover-preview' : ''} ${isActiveProvince ? 'is-active-province' : ''}`}
                         geography={geo}
                         key={`geo-interact-${geo.rsmKey}`}
+                        onBlur={() => onHoverProvince(null)}
                         onClick={(event) => activateProvince(event, { adcode, area, isHidden, isInFocusedArea })}
                         onFocus={() => {
                           if (viewLevel === 'country' && area) onHoverArea(area.id);
@@ -838,6 +1060,7 @@ function FoodMap({
                         }}
                         onKeyDown={(event) => handleProvinceKeyDown(event, { adcode, area, isHidden, isInFocusedArea })}
                         onMouseEnter={(event) => handleProvincePointer(event, { adcode, area, isHidden })}
+                        onMouseLeave={() => onHoverProvince(null)}
                         onMouseMove={(event) => handleProvincePointer(event, { adcode, area, isHidden })}
                         role="button"
                         style={{
@@ -988,12 +1211,13 @@ function FoodMap({
 /**
  * 独创：运行模式下的趣味问答通关小游戏及人文摘要组件
  */
-function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProvinceAdcode, viewLevel, onBackCountry, onBackArea, onSelectArea, theme }) {
+function RunSummary({ assetVersions, cachedImageUrls, currentArea, selectedFoodItem, selectedProvinceAdcode, viewLevel, onBackCountry, onBackArea, onSelectArea, theme }) {
   // 分数统计及答题闯关状态
   const [score, setScore] = useState(0);
   const [answeredMap, setAnsweredMap] = useState({}); // 保存每个省份/大区的答题记录
   const [selectedOption, setSelectedOption] = useState(null);
   const [isAnswered, setIsAnswered] = useState(false);
+  const panelRef = useRef(null);
   const themeCopy = getThemeCopy(theme);
 
   // 寻找当前选中的省级文化资产
@@ -1031,11 +1255,38 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }, [quizKey]);
 
   const isCurrentCorrect = answeredMap[quizKey] === 'correct';
+  const detailPreviewAsset = useMemo(() => {
+    if (viewLevel === 'province' && activeAsset?.src) {
+      return {
+        alt: `${activeAsset.title.replace('图', '')}省级大图`,
+        src: activeAsset.src,
+        title: activeAsset.title,
+      };
+    }
+    if (viewLevel === 'area' && currentArea?.summaryAsset?.src) {
+      return {
+        alt: `${currentArea.name}图板预览`,
+        src: currentArea.summaryAsset.src,
+        title: currentArea.summaryAsset.title,
+      };
+    }
+    return null;
+  }, [activeAsset, currentArea, viewLevel]);
+  const panelMotionKey = [
+    theme.id,
+    currentArea?.id || 'country',
+    viewLevel,
+    selectedProvinceAdcode || 'none',
+    selectedFoodItem?.id || 'none',
+    quizKey,
+    selectedOption ?? 'none',
+    isCurrentCorrect ? 'correct' : 'pending',
+  ].join('-');
+
+  useAnimePanelMotion(panelRef, panelMotionKey);
 
   function versionedImage(src) {
-    const cleanSrc = String(src || '').split('?')[0];
-    const version = assetVersions[cleanSrc];
-    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+    return getCachedImageUrl(src, assetVersions, cachedImageUrls);
   }
 
   function handleOptionClick(index) {
@@ -1059,7 +1310,7 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
   }
 
   return (
-    <aside className="side-card run-card">
+    <aside className="side-card run-card" ref={panelRef}>
       <div className="card-kicker">
         <Landmark size={16} aria-hidden="true" />
         <span>
@@ -1086,13 +1337,13 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
           : theme.description}
       </p>
 
-      {viewLevel !== 'country' && currentArea?.summaryAsset?.src && (
-        <figure className="region-board-preview">
+      {detailPreviewAsset?.src && (
+        <figure className={`region-board-preview ${viewLevel === 'province' ? 'province-board-preview' : ''}`}>
           <img
-            alt={`${currentArea.name}图板预览`}
-            src={versionedImage(currentArea.summaryAsset.src)}
+            alt={detailPreviewAsset.alt}
+            src={versionedImage(detailPreviewAsset.src)}
           />
-          <figcaption>{currentArea.summaryAsset.title}</figcaption>
+          <figcaption>{detailPreviewAsset.title}</figcaption>
         </figure>
       )}
       
@@ -1169,6 +1420,8 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
               <article className="process-sketch-step" key={`${selectedFoodItem.id}-step-${index}`}>
                 <div className="sketch-icon" aria-hidden="true">
                   <i />
+                  <span className="steam-line steam-line-left" />
+                  <span className="steam-line steam-line-right" />
                   <b>{index + 1}</b>
                 </div>
                 <p>{step}</p>
@@ -1275,10 +1528,11 @@ function RunSummary({ assetVersions, currentArea, selectedFoodItem, selectedProv
 /**
  * AI 灵感生成舱：开发模式下步骤式引导评委和开发者接入 MCP 协议与 AI 交互控制台
  */
-function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, onFlowStep, onSelectArea, onToolResult, theme }) {
+function McpPanel({ assetVersions, cachedImageUrls, currentArea, flowStep, onAssetRegenerated, onFlowStep, onSelectArea, onToolResult, theme }) {
   const [prompt, setPrompt] = useState('');
   const [assetPrompt, setAssetPrompt] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState('');
+  const panelRef = useRef(null);
   const attachImageAsset = useFoodMapStore((state) => state.attachImageAsset);
   const updateAreaConfig = useFoodMapStore((state) => state.updateAreaConfig);
   const themeCopy = getThemeCopy(theme);
@@ -1405,11 +1659,17 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
   const imageAssets = imageAssetData?.assets || [];
   const selectedImageAsset = imageAssets.find((asset) => asset.id === selectedAssetId) || imageAssets[0];
   const assetBusy = savePromptMutation.isPending || regenerateMutation.isPending;
+  const spinnerMotionKey = [
+    mcpMutation.isPending ? 'mcp' : 'idle',
+    regenerateMutation.isPending ? 'regen' : 'idle',
+    toolsLoading ? 'tools' : 'tools-ready',
+    assetsLoading ? 'assets' : 'assets-ready',
+  ].join('-');
+
+  useAnimeSpinners(panelRef, spinnerMotionKey);
 
   function versionedAsset(src) {
-    const cleanSrc = String(src || '').split('?')[0];
-    const version = assetVersions[cleanSrc];
-    return version ? `${cleanSrc}?v=${version}` : cleanSrc;
+    return getCachedImageUrl(src, assetVersions, cachedImageUrls);
   }
 
   function getAssetKindLabel(asset) {
@@ -1442,7 +1702,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
   }, [selectedImageAsset]);
 
   return (
-    <aside className="side-card mcp-panel">
+    <aside className="side-card mcp-panel" ref={panelRef}>
       <div className="card-kicker">
         <Bot size={16} aria-hidden="true" />
         <span>AI 灵感生成舱控制台</span>
@@ -1529,7 +1789,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
       {/* 桥接状态监控 */}
       <div className="mcp-status">
         <span>{toolsLoading ? '探测后台 API 隧道...' : `发现 ${tools?.tools?.length || 0} 个活动 AI MCP 通道`}</span>
-        {mcpMutation.isPending && <Loader2 className="spin" size={14} aria-hidden="true" />}
+        {mcpMutation.isPending && <Loader2 className="anime-spin" size={14} aria-hidden="true" />}
       </div>
 
       {/* 生成的 Prompt 或已有图片资产路径展示 */}
@@ -1569,7 +1829,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
             <div className="asset-preview-grid">
               {selectedImageAsset.inputImage ? (
                 <figure>
-                  <img alt={`${selectedImageAsset.title} 输入轮廓`} src={selectedImageAsset.inputImage} />
+                  <img alt={`${selectedImageAsset.title} 输入轮廓`} src={versionedAsset(selectedImageAsset.inputImage)} />
                   <figcaption>输入轮廓</figcaption>
                 </figure>
               ) : (
@@ -1615,7 +1875,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
                 onClick={() => regenerateMutation.mutate({ assetId: selectedImageAsset.id, prompt: assetPrompt })}
                 type="button"
               >
-                {regenerateMutation.isPending ? <Loader2 className="spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
+                {regenerateMutation.isPending ? <Loader2 className="anime-spin" size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
                 重新生成
               </button>
             </div>
@@ -1630,6 +1890,7 @@ function McpPanel({ assetVersions, currentArea, flowStep, onAssetRegenerated, on
  * 宗教信仰文化交互地图大盘——React 核心主入口组件
  */
 function App() {
+  const appShellRef = useRef(null);
   const [notice, setNotice] = useState(getThemeCopy(getCultureThemeById(DEFAULT_CULTURE_THEME_ID)).readyNotice);
   const [assetVersions, setAssetVersions] = useState({});
   const siteTheme = 'dark-ink';
@@ -1647,6 +1908,19 @@ function App() {
   const currentArea = getAreaById(theme, selectedAreaId);
   const provinceAreaMap = useMemo(() => buildProvinceAreaMap(theme), [theme]);
   const themeCopy = getThemeCopy(theme);
+  const appMotionKey = [
+    cultureThemeId,
+    appMode,
+    flowStep,
+    viewLevel,
+    selectedAreaId,
+    selectedProvinceAdcode || 'none',
+  ].join('-');
+
+  const cachedImageUrls = useLocalImageCache(theme, assetVersions);
+  useAnimeHoverInteractions(appShellRef);
+  useAnimeThemeSwap(appShellRef, appMotionKey);
+  useAnimeSpinners(appShellRef, appMotionKey);
 
   // 实现多主题平滑挂载及一屏式沉浸感设计，强制不溢出滚动
   useEffect(() => {
@@ -1689,7 +1963,13 @@ function App() {
 
   function handleHoverProvince(adcode, areaId) {
     const nextAdcode = String(adcode || '');
-    if (!nextAdcode || nextAdcode === String(hoveredProvinceAdcode || '')) return;
+    if (!nextAdcode) {
+      if (hoveredProvinceAdcode !== null) {
+        setHoveredProvinceAdcode(null);
+      }
+      return;
+    }
+    if (nextAdcode === String(hoveredProvinceAdcode || '')) return;
     setHoveredProvinceAdcode(nextAdcode);
     if (areaId && viewLevel === 'country') {
       const area = getAreaById(theme, areaId);
@@ -1699,7 +1979,6 @@ function App() {
       return;
     }
     if (viewLevel === 'area' && currentArea?.provinceAdcodes?.map(String).includes(nextAdcode)) {
-      setSelectedProvinceAdcode(nextAdcode);
       const asset = currentArea.assets?.find((item) => String(item.provinceAdcode) === nextAdcode);
       if (asset) {
         setNotice(`指针高亮：${asset.title.replace('图', '')}`);
@@ -1752,9 +2031,15 @@ function App() {
   }
 
   function handleSelectProvince(adcode) {
-    setSelectedProvinceAdcode(adcode);
-    setHoveredProvinceAdcode(String(adcode));
+    const nextAdcode = String(adcode);
+    setSelectedProvinceAdcode(nextAdcode);
+    setHoveredProvinceAdcode(nextAdcode);
     setSelectedFoodItem(null);
+    const area = currentArea || provinceAreaMap.get(nextAdcode);
+    const asset = area?.assets?.find((item) => String(item.provinceAdcode) === nextAdcode);
+    if (asset) {
+      setNotice(`已进入省级大图：${asset.title.replace('图', '')}`);
+    }
   }
 
   function handleBackCountry() {
@@ -1780,7 +2065,7 @@ function App() {
   }, [currentArea, selectedProvinceAdcode]);
 
   return (
-    <main className={`app-shell mode-${appMode} theme-${siteTheme}`}>
+    <main className={`app-shell mode-${appMode} theme-${siteTheme}`} ref={appShellRef}>
       {/* 高端磨砂玻璃顶栏 */}
       <header className="topbar">
         <button className="brand" onClick={handleBackCountry} type="button">
@@ -1884,6 +2169,7 @@ function App() {
           </div>
           <FoodMap
             assetVersions={assetVersions}
+            cachedImageUrls={cachedImageUrls}
             currentArea={currentArea}
             hoveredAreaId={hoveredAreaId}
             hoveredProvinceAdcode={hoveredProvinceAdcode}
@@ -1906,6 +2192,7 @@ function App() {
           {appMode === 'dev' ? (
             <McpPanel
               assetVersions={assetVersions}
+              cachedImageUrls={cachedImageUrls}
               currentArea={currentArea}
               flowStep={flowStep}
               onAssetRegenerated={(asset, cacheBust) => {
@@ -1922,6 +2209,7 @@ function App() {
           ) : (
             <RunSummary
               assetVersions={assetVersions}
+              cachedImageUrls={cachedImageUrls}
               currentArea={currentArea}
               selectedFoodItem={selectedFoodItem}
               selectedProvinceAdcode={selectedProvinceAdcode}

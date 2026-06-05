@@ -233,13 +233,18 @@ export function useAnimeMapStage(stageRef, motionKey, isLoading) {
     const fillImages = [...stage.querySelectorAll('.map-fill-image')];
     fillImages.forEach((image, index) => {
       const finalOpacity = Number.parseFloat(image.dataset.animeOpacity || '1');
-      image.style.opacity = '0';
+      const seen = image.dataset.animeSeen === 'true';
+      const currentOpacity = seen ? Number.parseFloat(getComputedStyle(image).opacity || '0') : 0;
+      const startOpacity = Number.isFinite(currentOpacity) ? currentOpacity : 0;
+      const targetOpacity = Number.isFinite(finalOpacity) ? finalOpacity : 1;
+      image.dataset.animeSeen = 'true';
+      image.style.opacity = String(startOpacity);
       animations.push(animate(image, {
-        delay: prefersReducedMotion() ? 0 : index * 45,
-        duration: prefersReducedMotion() ? 1 : (image.classList.contains('is-soft') ? 460 : 620),
+        delay: prefersReducedMotion() || seen ? 0 : index * 45,
+        duration: prefersReducedMotion() ? 1 : (seen ? 220 : image.classList.contains('is-soft') ? 460 : 620),
         ease: 'out(3)',
-        opacity: [0, Number.isFinite(finalOpacity) ? finalOpacity : 1],
-        scale: [0.965, 1],
+        opacity: [startOpacity, targetOpacity],
+        scale: seen ? [1, 1] : [0.965, 1],
       }));
     });
 

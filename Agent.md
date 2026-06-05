@@ -138,6 +138,15 @@ This starts both:
 
 After every project update, restart the running project on `0.0.0.0:3000` and report the external access URL to the user. Use `http://103.163.46.225:3000/` as the standard access address unless the user provides a newer host.
 
+The deployed frontend is served by nginx from `/www/wwwroot/china-map-explorer/dist` on port `3000`. After syncing a fresh `dist/` build to that directory, run:
+
+```bash
+chmod -R a+rX /www/wwwroot/china-map-explorer/dist
+nginx -s reload
+```
+
+This keeps nginx from returning `403 Forbidden` because of restrictive build-output permissions.
+
 Build:
 
 ```bash
